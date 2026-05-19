@@ -1,0 +1,151 @@
+version: 2.1
+
+orbs:
+  rust: circleci/rust@1.6.1
+
+jobs:
+  test:
+    docker:
+      - image: cimg/rust:1.85
+    steps:
+      - checkout
+      - rust/clippy
+      - rust/test
+
+  build-release:
+    parameters:
+      target:
+        type: string
+      binary_suffix:
+        type: string
+        default: ""
+    docker:
+      - image: cimg/rust:1.85
+    steps:
+      - checkout
+      - run:
+          name: Install cross-compilation target
+          command: rustup target add << parameters.target >>
+      - run:
+          name: Install cross
+          command: cargo install cross --git https://github.com/cross-rs/cross
+      - run:
+          name: Build release binary
+          command: cross build --release --target << parameters.target >>
+      - run:
+          name: Package binary
+          command: |
+            mkdir -p artifacts
+            cp target/<< parameters.target >>/release/release-ratchet<< parameters.binary_suffix >> \
+              artifacts/release-ratchet-<< parameters.target >><< parameters.binary_suffix >>
+      - persist_to_workspace:
+          root: artifacts
+          paths:
+            - "*"
+
+  build-macos:
+    parameters:
+      target:
+        type: string
+    macos:
+      xcode: "15.4.0"
+    resource_class: macos.m1.medium.gen1
+    steps:
+      - checkout
+      - run:
+          name: Install Rust
+          command: |
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
+      - run:
+          name: Add target
+          command: rustup target add << parameters.target >>
+      - run:
+          name: Build release binary
+          command: cargo build --release --target << parameters.target >>
+      - run:
+          name: Package binary
+          command: |
+            mkdir -p artifacts
+            cp target/<< parameters.target >>/release/release-ratchet \
+              artifacts/release-ratchet-<< parameters.target >>
+      - persist_to_workspace:
+          root: artifacts
+          paths:
+            - "*"
+
+  publish-github-release:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - attach_workspace:
+          at: artifacts
+      - run:
+          name: Install gh CLI
+          command: |
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt update && sudo apt install gh -y
+      - run:
+          name: Create GitHub release with binaries
+          command: |
+            TAG=${CIRCLE_TAG}
+            gh release create "$TAG" \
+              --repo "$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME" \
+              --title "$TAG" \
+              --generate-notes \
+              artifacts/*
+
+workflows:
+  test:
+    jobs:
+      - test:
+          filters:
+            tags:
+              only: /.*/
+
+  release:
+    jobs:
+      - build-release:
+          name: build-linux-amd64
+          target: x86_64-unknown-linux-gnu
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/
+      - build-release:
+          name: build-linux-arm64
+          target: aarch64-unknown-linux-gnu
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/
+      - build-macos:
+          name: build-macos-arm64
+          target: aarch64-apple-darwin
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/
+      - build-macos:
+          name: build-macos-amd64
+          target: x86_64-apple-darwin
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/
+      - publish-github-release:
+          requires:
+            - build-linux-amd64
+            - build-linux-arm64
+            - build-macos-arm64
+            - build-macos-amd64
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/

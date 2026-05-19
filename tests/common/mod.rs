@@ -66,17 +66,17 @@ pub fn run_fail(cmd: &mut std::process::Command) -> (i32, String, String) {
 
 pub fn setup_with_config(config: &str) -> (TempDir, Repository) {
     let (dir, repo) = init_repo();
-    std::fs::write(dir.path().join(".release-ratchet.yml"), config).unwrap();
+    std::fs::write(dir.path().join(".release-ratchet.toml"), config).unwrap();
     commit(
-        &repo, dir.path(), ".release-ratchet.yml",
-        &std::fs::read_to_string(dir.path().join(".release-ratchet.yml")).unwrap(),
+        &repo, dir.path(), ".release-ratchet.toml",
+        &std::fs::read_to_string(dir.path().join(".release-ratchet.toml")).unwrap(),
         "chore: add config",
     );
     (dir, repo)
 }
 
-pub const MINIMAL_CONFIG: &str = "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n";
-pub const CARGO_CONFIG: &str = "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: cargo\n    path: \"Cargo.toml\"\n";
+pub const MINIMAL_CONFIG: &str = "tag_prefix = \"v\"\nmain_branch = \"main\"\n";
+pub const CARGO_CONFIG: &str = "tag_prefix = \"v\"\nmain_branch = \"main\"\n\n[[ecosystems]]\ntype = \"cargo\"\npath = \"Cargo.toml\"\n";
 
 pub fn write_cargo_toml(path: &Path, version: &str) {
     std::fs::write(

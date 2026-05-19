@@ -60,9 +60,9 @@ fn run_ok(cmd: &mut std::process::Command) -> (String, String) {
 
 fn setup_with_config(config: &str) -> (TempDir, Repository) {
     let (dir, repo) = init_repo();
-    std::fs::write(dir.path().join(".release-ratchet.yml"), config).unwrap();
-    commit(&repo, dir.path(), ".release-ratchet.yml",
-        &std::fs::read_to_string(dir.path().join(".release-ratchet.yml")).unwrap(),
+    std::fs::write(dir.path().join(".release-ratchet.toml"), config).unwrap();
+    commit(&repo, dir.path(), ".release-ratchet.toml",
+        &std::fs::read_to_string(dir.path().join(".release-ratchet.toml")).unwrap(),
         "chore: add config");
     (dir, repo)
 }
@@ -74,7 +74,7 @@ fn setup_with_config(config: &str) -> (TempDir, Repository) {
 #[test]
 fn contract_prepare_commit_message_consumed_by_release() {
     let (dir, repo) = setup_with_config(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
     );
     commit(&repo, dir.path(), "a.txt", "x", "feat: add feature");
 
@@ -91,7 +91,7 @@ fn contract_prepare_commit_message_consumed_by_release() {
 #[test]
 fn contract_prepare_commit_message_with_custom_prefix() {
     let (dir, repo) = setup_with_config(
-        "tag_prefix: \"release-v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"release-v\"\nmain_branch = \"main\"\n",
     );
     commit(&repo, dir.path(), "a.txt", "x", "feat: something");
 
@@ -107,7 +107,7 @@ fn contract_prepare_commit_message_with_custom_prefix() {
 #[test]
 fn contract_prepare_commit_message_with_empty_prefix() {
     let (dir, repo) = setup_with_config(
-        "tag_prefix: \"\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"\"\nmain_branch = \"main\"\n",
     );
     commit(&repo, dir.path(), "a.txt", "x", "feat: something");
 
@@ -128,7 +128,7 @@ fn contract_changelog_is_parseable_by_release_fallback() {
     // Simulate a squash merge: release can't find version in commit message
     // but falls back to reading CHANGELOG.md from the tree
     let (dir, repo) = setup_with_config(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
     );
     commit(&repo, dir.path(), "a.txt", "x", "feat: add feature");
 
@@ -167,7 +167,7 @@ fn contract_changelog_is_parseable_by_release_fallback() {
 #[test]
 fn contract_status_json_has_all_fields() {
     let (dir, repo) = setup_with_config(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
     );
     commit(&repo, dir.path(), "a.txt", "x", "feat!: breaking thing");
 
@@ -201,7 +201,7 @@ fn contract_status_json_has_all_fields() {
 #[test]
 fn contract_cargo_version_round_trips() {
     let (dir, repo) = setup_with_config(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: cargo\n    path: \"Cargo.toml\"\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n\n[[ecosystems]]\ntype = \"cargo\"\npath = \"Cargo.toml\"\n",
     );
     std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"test\"\nversion = \"0.0.0\"\nedition = \"2021\"\n").unwrap();
     commit(&repo, dir.path(), "Cargo.toml",
@@ -222,7 +222,7 @@ fn contract_cargo_version_round_trips() {
 #[test]
 fn contract_node_version_round_trips() {
     let (dir, repo) = setup_with_config(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: node\n    path: \"package.json\"\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n\n[[ecosystems]]\ntype = \"node\"\npath = \"package.json\"\n",
     );
     std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"test\",\n  \"version\": \"0.0.0\"\n}\n").unwrap();
     commit(&repo, dir.path(), "package.json",
@@ -242,7 +242,7 @@ fn contract_node_version_round_trips() {
 #[test]
 fn contract_node_preserves_formatting() {
     let (dir, repo) = setup_with_config(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: node\n    path: \"package.json\"\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n\n[[ecosystems]]\ntype = \"node\"\npath = \"package.json\"\n",
     );
     // Use tabs and unusual spacing
     let original = "{\n\t\"name\": \"test\",\n\t\"version\": \"0.0.0\",\n\t\"description\": \"a thing\"\n}\n";
@@ -264,7 +264,7 @@ fn contract_node_preserves_formatting() {
 #[test]
 fn contract_node_with_nested_version_only_bumps_toplevel() {
     let (dir, repo) = setup_with_config(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: node\n    path: \"package.json\"\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n\n[[ecosystems]]\ntype = \"node\"\npath = \"package.json\"\n",
     );
     // package.json with nested "version" in overrides
     let json = r#"{
@@ -299,7 +299,7 @@ fn contract_node_with_nested_version_only_bumps_toplevel() {
 #[test]
 fn contract_python_version_round_trips() {
     let (dir, repo) = setup_with_config(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: python\n    path: \"pyproject.toml\"\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n\n[[ecosystems]]\ntype = \"python\"\npath = \"pyproject.toml\"\n",
     );
     std::fs::write(dir.path().join("pyproject.toml"), "[project]\nname = \"test\"\nversion = \"0.0.0\"\n").unwrap();
     commit(&repo, dir.path(), "pyproject.toml",
@@ -319,7 +319,7 @@ fn contract_python_version_round_trips() {
 #[test]
 fn contract_generic_version_round_trips() {
     let (dir, repo) = setup_with_config(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: generic\n    path: \"version.txt\"\n    pattern: 'VERSION=(\\d+\\.\\d+\\.\\d+)'\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n\n[[ecosystems]]\ntype = \"generic\"\npath = \"version.txt\"\npattern = \"VERSION=(\\\\d+\\\\.\\\\d+\\\\.\\\\d+)\"\n",
     );
     std::fs::write(dir.path().join("version.txt"), "VERSION=0.0.0\n").unwrap();
     commit(&repo, dir.path(), "version.txt", "VERSION=0.0.0\n", "chore: add version file");

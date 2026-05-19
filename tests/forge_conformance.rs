@@ -85,10 +85,10 @@ struct ReleaseArtifacts {
 
 fn do_release_cycle(config: &str, commits: &[&str]) -> (TempDir, Repository, ReleaseArtifacts) {
     let (dir, repo) = init_repo();
-    std::fs::write(dir.path().join(".release-ratchet.yml"), config).unwrap();
+    std::fs::write(dir.path().join(".release-ratchet.toml"), config).unwrap();
     commit(
-        &repo, dir.path(), ".release-ratchet.yml",
-        &std::fs::read_to_string(dir.path().join(".release-ratchet.yml")).unwrap(),
+        &repo, dir.path(), ".release-ratchet.toml",
+        &std::fs::read_to_string(dir.path().join(".release-ratchet.toml")).unwrap(),
         "chore: add config",
     );
 
@@ -167,7 +167,7 @@ fn do_release_cycle(config: &str, commits: &[&str]) -> (TempDir, Repository, Rel
 #[test]
 fn github_tag_name_matches_release_pattern() {
     let (_, _, a) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: add feature"],
     );
     // GitHub Actions `on: push: tags: ['v*']` pattern
@@ -182,7 +182,7 @@ fn github_tag_name_matches_release_pattern() {
 #[test]
 fn github_changelog_section_is_valid_release_notes() {
     let (_, _, a) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: new feature", "fix: bug fix"],
     );
 
@@ -207,7 +207,7 @@ fn github_changelog_section_is_valid_release_notes() {
 #[test]
 fn github_tag_is_lightweight_by_default() {
     let (dir, _, a) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: add feature"],
     );
     // Reopen to get fresh state
@@ -222,7 +222,7 @@ fn github_tag_is_lightweight_by_default() {
 #[test]
 fn github_release_branch_is_valid_pr_source() {
     let (_, _, a) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: add feature"],
     );
     // Branch name must be a valid git ref
@@ -239,7 +239,7 @@ fn github_release_branch_is_valid_pr_source() {
 #[test]
 fn github_squash_merge_changelog_survives() {
     let (_, _, a) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: add feature"],
     );
     // The release commit must contain CHANGELOG.md with the version
@@ -260,7 +260,7 @@ fn github_squash_merge_changelog_survives() {
 #[test]
 fn gitlab_tag_triggers_pipeline() {
     let (_, _, a) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: add feature"],
     );
     // Tag must be a valid git ref name (no spaces, no .., no control chars)
@@ -273,7 +273,7 @@ fn gitlab_tag_triggers_pipeline() {
 #[test]
 fn gitlab_release_description_is_markdown() {
     let (_, _, a) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: new feature", "fix: bug fix"],
     );
     let section = &a.changelog_latest_section;
@@ -288,7 +288,7 @@ fn gitlab_release_description_is_markdown() {
 #[test]
 fn gitlab_merge_commit_version_detection() {
     let (dir, repo, _) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: add feature"],
     );
 
@@ -331,7 +331,7 @@ fn gitlab_merge_commit_version_detection() {
 #[test]
 fn bitbucket_tag_pattern() {
     let (_, _, a) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: add feature"],
     );
     // Bitbucket uses glob pattern matching for tag triggers
@@ -344,7 +344,7 @@ fn bitbucket_tag_pattern() {
 #[test]
 fn bitbucket_squash_merge_version_detection() {
     let (dir, repo, _) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: add feature"],
     );
 
@@ -382,7 +382,7 @@ fn bitbucket_squash_merge_version_detection() {
 #[test]
 fn git_describe_finds_our_tag() {
     let (dir, _, a) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: add feature"],
     );
     // Reopen to get fresh state
@@ -403,10 +403,10 @@ fn git_describe_finds_our_tag() {
 fn git_tag_sort_order() {
     // Do two releases and verify they sort correctly
     let (dir, repo) = init_repo();
-    std::fs::write(dir.path().join(".release-ratchet.yml"),
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n").unwrap();
-    commit(&repo, dir.path(), ".release-ratchet.yml",
-        &std::fs::read_to_string(dir.path().join(".release-ratchet.yml")).unwrap(),
+    std::fs::write(dir.path().join(".release-ratchet.toml"),
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n").unwrap();
+    commit(&repo, dir.path(), ".release-ratchet.toml",
+        &std::fs::read_to_string(dir.path().join(".release-ratchet.toml")).unwrap(),
         "chore: add config");
 
     commit(&repo, dir.path(), "a.txt", "1", "feat: first");
@@ -440,7 +440,7 @@ fn git_tag_sort_order() {
 #[test]
 fn git_log_release_commit_is_single_line() {
     let (_, _, a) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: add feature"],
     );
     let first_line = a.release_commit_message.lines().next().unwrap();
@@ -455,7 +455,7 @@ fn git_log_release_commit_is_single_line() {
 #[test]
 fn git_tag_is_valid_ref_name() {
     let (_, _, a) = do_release_cycle(
-        "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n",
+        "tag_prefix = \"v\"\nmain_branch = \"main\"\n",
         &["feat: add feature"],
     );
     let invalid_chars = [' ', '~', '^', ':', '\\', '*', '?', '['];

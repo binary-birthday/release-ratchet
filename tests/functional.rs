@@ -55,7 +55,7 @@ fn commit(repo: &Repository, path: &Path, filename: &str, content: &str, message
 }
 
 fn write_config(path: &Path, content: &str) {
-    std::fs::write(path.join(".release-ratchet.yml"), content).unwrap();
+    std::fs::write(path.join(".release-ratchet.toml"), content).unwrap();
 }
 
 fn write_cargo_toml(path: &Path, version: &str) {
@@ -106,8 +106,8 @@ fn setup_with_config(config: &str) -> (TempDir, Repository) {
     let (dir, repo) = init_repo();
     write_config(dir.path(), config);
     commit(
-        &repo, dir.path(), ".release-ratchet.yml",
-        &std::fs::read_to_string(dir.path().join(".release-ratchet.yml")).unwrap(),
+        &repo, dir.path(), ".release-ratchet.toml",
+        &std::fs::read_to_string(dir.path().join(".release-ratchet.toml")).unwrap(),
         "chore: add config",
     );
     (dir, repo)
@@ -126,8 +126,8 @@ fn commit_initial_files(repo: &Repository, _dir: &Path, files: &[&str]) {
     repo.commit(Some("HEAD"), &sig, &sig, "chore: setup project", &tree, &[&head]).unwrap();
 }
 
-const MINIMAL_CONFIG: &str = "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems: []\n";
-const CARGO_CONFIG: &str = "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: cargo\n    path: \"Cargo.toml\"\n";
+const MINIMAL_CONFIG: &str = "tag_prefix = \"v\"\nmain_branch = \"main\"\n";
+const CARGO_CONFIG: &str = "tag_prefix = \"v\"\nmain_branch = \"main\"\n\n[[ecosystems]]\ntype = \"cargo\"\npath = \"Cargo.toml\"\n";
 
 // ============================================================================
 // Status
@@ -237,7 +237,7 @@ fn validate_invalid_in_range_exits_3() {
 fn init_creates_config() {
     let (dir, _) = init_repo();
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "init"]));
-    assert!(dir.path().join(".release-ratchet.yml").exists());
+    assert!(dir.path().join(".release-ratchet.toml").exists());
     // Without --force: fails
     let output = binary().args(["--repo", dir.path().to_str().unwrap(), "init"]).output().unwrap();
     assert!(!output.status.success());
@@ -273,7 +273,7 @@ fn prepare_creates_branch_and_changelog() {
     let (dir, repo) = init_repo();
     write_cargo_toml(dir.path(), "0.0.0");
     write_config(dir.path(), CARGO_CONFIG);
-    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.toml"]);
     commit(&repo, dir.path(), "feature.rs", "fn main() {}", "feat: add main feature");
     commit(&repo, dir.path(), "fix.rs", "fn fix() {}", "fix: patch a bug");
     let (_, stderr) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare"]));
@@ -417,7 +417,7 @@ fn full_prepare_release_two_cycles() {
     let (dir, repo) = init_repo();
     write_cargo_toml(dir.path(), "0.0.0");
     write_config(dir.path(), CARGO_CONFIG);
-    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.toml"]);
 
     // Cycle 1: feat → 0.1.0
     commit(&repo, dir.path(), "feature.rs", "fn feat() {}", "feat: add feature");
@@ -496,7 +496,7 @@ fn full_branch_prepare_merge_release() {
 
 #[test]
 fn full_custom_tag_prefix() {
-    let (dir, repo) = setup_with_config("tag_prefix: \"myapp-v\"\nmain_branch: \"main\"\necosystems: []\n");
+    let (dir, repo) = setup_with_config("tag_prefix = \"myapp-v\"\nmain_branch = \"main\"\n");
     commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
@@ -518,8 +518,8 @@ fn multiple_ecosystem_bumping() {
     write_cargo_toml(dir.path(), "0.0.0");
     write_package_json(dir.path(), "0.0.0");
     write_pyproject_toml(dir.path(), "0.0.0");
-    write_config(dir.path(), "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: cargo\n    path: \"Cargo.toml\"\n  - type: node\n    path: \"package.json\"\n  - type: python\n    path: \"pyproject.toml\"\n");
-    commit_initial_files(&repo, dir.path(), &["Cargo.toml", "package.json", "pyproject.toml", ".release-ratchet.yml"]);
+    write_config(dir.path(), "tag_prefix = \"v\"\nmain_branch = \"main\"\n\n[[ecosystems]]\ntype = \"cargo\"\npath = \"Cargo.toml\"\n\n[[ecosystems]]\ntype = \"node\"\npath = \"package.json\"\n\n[[ecosystems]]\ntype = \"python\"\npath = \"pyproject.toml\"\n");
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", "package.json", "pyproject.toml", ".release-ratchet.toml"]);
     commit(&repo, dir.path(), "feature.rs", "fn f() {}", "feat: add feature");
     let (_, stderr) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
     assert!(stderr.contains("0.0.0 -> 0.1.0"));
@@ -976,10 +976,10 @@ fn prerelease_full_cycle() {
 fn autodetect_cargo_and_node() {
     let (dir, repo) = init_repo();
     // Config with no ecosystems listed
-    write_config(dir.path(), "tag_prefix: \"v\"\nmain_branch: \"main\"\n");
+    write_config(dir.path(), "tag_prefix = \"v\"\nmain_branch = \"main\"\n");
     write_cargo_toml(dir.path(), "0.0.0");
     write_package_json(dir.path(), "0.0.0");
-    commit_initial_files(&repo, dir.path(), &[".release-ratchet.yml", "Cargo.toml", "package.json"]);
+    commit_initial_files(&repo, dir.path(), &[".release-ratchet.toml", "Cargo.toml", "package.json"]);
     commit(&repo, dir.path(), "a.txt", "x", "feat: add feature");
 
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
@@ -993,7 +993,7 @@ fn autodetect_cargo_and_node() {
 #[test]
 fn autodetect_no_config_file() {
     let (dir, repo) = init_repo();
-    // No .release-ratchet.yml at all
+    // No .release-ratchet.toml at all
     write_cargo_toml(dir.path(), "0.0.0");
     commit_initial_files(&repo, dir.path(), &["Cargo.toml"]);
     commit(&repo, dir.path(), "a.txt", "x", "feat: add feature");
@@ -1008,10 +1008,10 @@ fn autodetect_no_config_file() {
 fn autodetect_skipped_when_ecosystems_configured() {
     let (dir, repo) = init_repo();
     // Config explicitly lists only node
-    write_config(dir.path(), "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: node\n    path: \"package.json\"\n");
+    write_config(dir.path(), "tag_prefix = \"v\"\nmain_branch = \"main\"\n\n[[ecosystems]]\ntype = \"node\"\npath = \"package.json\"\n");
     write_cargo_toml(dir.path(), "0.0.0");
     write_package_json(dir.path(), "0.0.0");
-    commit_initial_files(&repo, dir.path(), &[".release-ratchet.yml", "Cargo.toml", "package.json"]);
+    commit_initial_files(&repo, dir.path(), &[".release-ratchet.toml", "Cargo.toml", "package.json"]);
     commit(&repo, dir.path(), "a.txt", "x", "feat: add feature");
 
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
@@ -1033,7 +1033,7 @@ fn bump_auto_from_commits() {
     let (dir, repo) = init_repo();
     write_cargo_toml(dir.path(), "0.0.0");
     write_config(dir.path(), CARGO_CONFIG);
-    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.toml"]);
     commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
 
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "bump"]));
@@ -1047,7 +1047,7 @@ fn bump_with_override() {
     let (dir, repo) = init_repo();
     write_cargo_toml(dir.path(), "0.0.0");
     write_config(dir.path(), CARGO_CONFIG);
-    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.toml"]);
     commit(&repo, dir.path(), "a.txt", "x", "fix: fix");
 
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "bump", "--bump", "major"]));
@@ -1061,7 +1061,7 @@ fn bump_release_version() {
     let (dir, repo) = init_repo();
     write_cargo_toml(dir.path(), "0.0.0");
     write_config(dir.path(), CARGO_CONFIG);
-    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.toml"]);
 
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "bump", "--release-version", "3.0.0"]));
 
@@ -1074,7 +1074,7 @@ fn bump_dry_run_no_changes() {
     let (dir, repo) = init_repo();
     write_cargo_toml(dir.path(), "0.0.0");
     write_config(dir.path(), CARGO_CONFIG);
-    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.toml"]);
     commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
 
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "bump", "--dry-run"]));
@@ -1101,7 +1101,7 @@ fn check_consistent_state_passes() {
     let (dir, repo) = init_repo();
     write_cargo_toml(dir.path(), "0.0.0");
     write_config(dir.path(), CARGO_CONFIG);
-    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.toml"]);
     commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
 
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
@@ -1115,8 +1115,8 @@ fn check_version_drift_fails() {
     let (dir, repo) = init_repo();
     write_cargo_toml(dir.path(), "0.0.0");
     write_package_json(dir.path(), "0.0.0");
-    write_config(dir.path(), "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: cargo\n    path: \"Cargo.toml\"\n  - type: node\n    path: \"package.json\"\n");
-    commit_initial_files(&repo, dir.path(), &["Cargo.toml", "package.json", ".release-ratchet.yml"]);
+    write_config(dir.path(), "tag_prefix = \"v\"\nmain_branch = \"main\"\n\n[[ecosystems]]\ntype = \"cargo\"\npath = \"Cargo.toml\"\n\n[[ecosystems]]\ntype = \"node\"\npath = \"package.json\"\n");
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", "package.json", ".release-ratchet.toml"]);
     commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
@@ -1133,7 +1133,7 @@ fn check_json_output() {
     let (dir, repo) = init_repo();
     write_cargo_toml(dir.path(), "0.0.0");
     write_config(dir.path(), CARGO_CONFIG);
-    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.toml"]);
     commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));

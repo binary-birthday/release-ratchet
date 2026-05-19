@@ -48,7 +48,7 @@ pub enum Commands {
     Hook(HookArgs),
     /// Generate shell completion scripts.
     Completions(CompletionsArgs),
-    /// Initialize a .release-ratchet.yml config file with defaults.
+    /// Initialize a .release-ratchet.toml config file with defaults.
     Init(InitArgs),
 }
 

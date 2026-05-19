@@ -5,44 +5,56 @@ use anyhow::{Result, bail};
 use crate::cli::InitArgs;
 
 const DEFAULT_CONFIG: &str = r#"# release-ratchet configuration
-# See: https://github.com/your-org/release-ratchet
 
 # Tag prefix prepended to version numbers (e.g., "v" -> "v1.2.3")
-tag_prefix: "v"
+tag_prefix = "v"
 
 # The primary branch
-main_branch: "main"
+main_branch = "main"
 
 # The branch name created during `prepare`
-release_branch: "release-ratchet--release"
+release_branch = "release-ratchet--release"
 
 # Path to the changelog file
-changelog_path: "CHANGELOG.md"
+changelog_path = "CHANGELOG.md"
 
 # Ecosystems to update version numbers in
-ecosystems:
-  - type: cargo
-    path: "Cargo.toml"
-  # - type: node
-  #   path: "package.json"
-  # - type: python
-  #   path: "pyproject.toml"
-  # - type: generic
-  #   path: "version.txt"
-  #   pattern: 'version\s*=\s*"(\d+\.\d+\.\d+)"'
+[[ecosystems]]
+type = "cargo"
+path = "Cargo.toml"
+
+# [[ecosystems]]
+# type = "node"
+# path = "package.json"
+
+# [[ecosystems]]
+# type = "python"
+# path = "pyproject.toml"
+
+# [[ecosystems]]
+# type = "generic"
+# path = "version.txt"
+# pattern = 'version\s*=\s*"(\d+\.\d+\.\d+)"'
 
 # Optional: override built-in commit type behavior
-# commit_type_overrides:
-#   refactor:
-#     bump: patch
-#     changelog: "Refactoring"
+# [commit_type_overrides.refactor]
+# bump = "patch"
+# changelog = "Refactoring"
 
 # GPG sign release tags (creates annotated tags)
-sign_tags: false
+sign_tags = false
+
+# Delete the release branch after tagging
+cleanup_branch = false
+
+# Lifecycle hooks
+# [hooks]
+# post_prepare = ["cargo check"]
+# post_release = ["cargo publish"]
 "#;
 
 pub fn execute(repo_path: &Path, args: InitArgs) -> Result<()> {
-    let config_path = repo_path.join(".release-ratchet.yml");
+    let config_path = repo_path.join(".release-ratchet.toml");
 
     if config_path.exists() && !args.force {
         bail!(

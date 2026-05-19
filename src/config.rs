@@ -154,7 +154,7 @@ fn default_python_path() -> PathBuf {
 pub fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Config, RatchetError> {
     let (path, explicit) = match config_path {
         Some(p) => (p.to_path_buf(), true),
-        None => (repo_root.join(".release-ratchet.yml"), false),
+        None => (repo_root.join(".release-ratchet.toml"), false),
     };
 
     if !path.exists() {
@@ -176,7 +176,7 @@ pub fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Confi
         path.display()
     )))?;
 
-    let mut config: Config = serde_yaml::from_str(&contents).map_err(|e| RatchetError::Config(format!(
+    let mut config: Config = toml::from_str(&contents).map_err(|e| RatchetError::Config(format!(
         "failed to parse {}: {e}",
         path.display()
     )))?;

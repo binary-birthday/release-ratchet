@@ -1,6 +1,6 @@
 [package]
 name = "release-ratchet"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Git-vendor-agnostic semantic release tool using conventional commits"
 

@@ -151,8 +151,46 @@ pub fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Confi
         path.display()
     )))?;
 
-    serde_yaml::from_str(&contents).map_err(|e| RatchetError::Config(format!(
+    let config: Config = serde_yaml::from_str(&contents).map_err(|e| RatchetError::Config(format!(
         "failed to parse {}: {e}",
         path.display()
-    )))
+    )))?;
+
+    validate_paths(repo_root, &config)?;
+    Ok(config)
+}
+
+fn validate_paths(repo_root: &Path, config: &Config) -> Result<(), RatchetError> {
+    validate_relative_path(&config.changelog_path, "changelog_path")?;
+    for eco in &config.ecosystems {
+        let p = match eco {
+            EcosystemConfig::Cargo { path } => path,
+            EcosystemConfig::Node { path } => path,
+            EcosystemConfig::Python { path } => path,
+            EcosystemConfig::Generic { path, .. } => path,
+        };
+        validate_relative_path(p, "ecosystem path")?;
+        // Verify resolved path stays within repo root
+        let resolved = repo_root.join(p);
+        if let Ok(canonical) = resolved.canonicalize() {
+            if !canonical.starts_with(repo_root) {
+                return Err(RatchetError::Config(format!(
+                    "{} '{}' resolves outside the repository",
+                    "ecosystem path",
+                    p.display()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_relative_path(path: &Path, label: &str) -> Result<(), RatchetError> {
+    if path.is_absolute() {
+        return Err(RatchetError::Config(format!(
+            "{label} must be a relative path, got '{}'",
+            path.display()
+        )));
+    }
+    Ok(())
 }

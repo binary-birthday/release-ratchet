@@ -34,7 +34,7 @@ pub enum RatchetError {
 pub enum ExitCode {
     /// Nothing to release (no releasable commits found). Exit code 2.
     NothingToRelease,
-    /// Validation failed (invalid commit messages). Exit code 1.
+    /// Validation failed (invalid commit messages). Exit code 3.
     ValidationFailed,
 }
 
@@ -53,7 +53,7 @@ impl ExitCode {
     pub fn code(&self) -> i32 {
         match self {
             Self::NothingToRelease => 2,
-            Self::ValidationFailed => 1,
+            Self::ValidationFailed => 3,
         }
     }
 }

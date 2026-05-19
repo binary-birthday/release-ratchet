@@ -112,20 +112,59 @@ fn execute_with_version(
         return Ok(());
     }
 
-    // 6. Create release branch FIRST (before modifying files), unless --no-branch
+    // 6. Create release branch FIRST (before modifying files), unless --no-branch.
+    //    Save original ref so we can restore on failure.
     let branch_name = args
         .branch
         .as_deref()
         .unwrap_or(&config.release_branch);
 
-    if !args.no_branch {
+    let original_head = if !args.no_branch {
+        let head = repository.head().context("failed to read HEAD")?;
+        let refname = head.name().map(String::from);
         branch::create_and_checkout(repository, branch_name)
             .context(format!("failed to create branch '{branch_name}'"))?;
+        refname
+    } else {
+        None
+    };
+
+    // Run the rest in a closure so we can catch errors and restore the branch
+    let result = apply_release_changes(
+        repo_path,
+        config,
+        repository,
+        &section,
+        next_version,
+        branch_name,
+        args.no_branch,
+    );
+
+    if let Err(ref e) = result {
+        // Attempt to restore the original branch on failure
+        if let Some(ref refname) = original_head {
+            log::warn!("prepare failed, restoring original branch: {e:#}");
+            if let Err(restore_err) = restore_head(repository, refname) {
+                log::error!("failed to restore original branch: {restore_err}");
+            }
+        }
     }
 
+    result
+}
+
+fn apply_release_changes(
+    repo_path: &Path,
+    config: &Config,
+    repository: &git2::Repository,
+    section: &str,
+    next_version: &Version,
+    branch_name: &str,
+    no_branch: bool,
+) -> Result<()> {
     // 7. Update CHANGELOG.md (now on the release branch)
     let changelog_full_path = repo_path.join(&config.changelog_path);
-    let updated_changelog = writer::update_changelog(&changelog_full_path, &section)
+    let updated_changelog = writer::update_changelog(&changelog_full_path, section)
         .context("failed to update changelog")?;
     writer::write_changelog(&changelog_full_path, &updated_changelog)
         .context("failed to write changelog")?;
@@ -145,14 +184,16 @@ fn execute_with_version(
     let tree_oid = index.write_tree()?;
     let tree = repository.find_tree(tree_oid)?;
     let head = repository.head()?.peel_to_commit()?;
-    let sig = repository.signature()?;
+    let sig = repository.signature().context(
+        "git user.name and user.email must be configured (set via git config)"
+    )?;
     let tag_name = format!("{}{next_version}", config.tag_prefix);
     let message = format!("chore: release {tag_name}");
 
     repository.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&head])?;
 
     eprintln!("Created release commit: {message}");
-    if !args.no_branch {
+    if !no_branch {
         eprintln!(
             "Release branch '{}' is ready. Create a PR/MR to merge it into '{}'.",
             branch_name, config.main_branch
@@ -162,5 +203,12 @@ fn execute_with_version(
         "After merging, run `release-ratchet release` to tag the release."
     );
 
+    Ok(())
+}
+
+fn restore_head(repo: &git2::Repository, refname: &str) -> Result<(), git2::Error> {
+    let obj = repo.revparse_single(refname)?;
+    repo.checkout_tree(&obj, Some(git2::build::CheckoutBuilder::new().force()))?;
+    repo.set_head(refname)?;
     Ok(())
 }

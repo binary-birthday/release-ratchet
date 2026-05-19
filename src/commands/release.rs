@@ -60,7 +60,7 @@ fn detect_version_from_commit(
 
     // Try to extract from "chore: release vX.Y.Z" or "chore: release X.Y.Z"
     let release_re = Regex::new(&format!(
-        r"chore:\s+release\s+{}?(\d+\.\d+\.\d+(?:-[\w.]+)?)",
+        r"chore:\s+release\s+(?:{})?(\d+\.\d+\.\d+(?:-[\w.]+)?)",
         regex::escape(&config.tag_prefix)
     ))
     .unwrap();
@@ -73,7 +73,6 @@ fn detect_version_from_commit(
 
     // If it's a merge commit, check the merged branch's commits
     if commit.parent_count() > 1 {
-        // Check second parent (the merged branch)
         if let Ok(parent) = commit.parent(1) {
             let parent_msg = parent.message().unwrap_or("");
             if let Some(caps) = release_re.captures(parent_msg) {
@@ -84,8 +83,43 @@ fn detect_version_from_commit(
         }
     }
 
+    // Fall back to reading the CHANGELOG.md from the commit's tree.
+    // This handles squash merges where the commit message is the PR title.
+    if let Ok(version) = detect_version_from_changelog(repo, &commit, config) {
+        return Ok(version);
+    }
+
     anyhow::bail!(
-        "Could not detect version from commit {oid}. \
-         Use --release-version to specify it explicitly."
+        "Could not detect version from commit {}. \
+         Use --release-version to specify it explicitly.",
+        oid_hex_short(oid),
     )
+}
+
+fn detect_version_from_changelog(
+    repo: &git2::Repository,
+    commit: &git2::Commit,
+    config: &Config,
+) -> Result<Version> {
+    let tree = commit.tree()?;
+    let changelog_path = config.changelog_path.to_str().unwrap_or("CHANGELOG.md");
+    let entry = tree.get_path(Path::new(changelog_path))
+        .context("CHANGELOG.md not found in commit tree")?;
+    let blob = repo.find_blob(entry.id())
+        .context("failed to read CHANGELOG.md blob")?;
+    let content = std::str::from_utf8(blob.content())
+        .context("CHANGELOG.md is not valid UTF-8")?;
+
+    // Parse the first "## [X.Y.Z]" heading
+    let version_re = Regex::new(r"## \[(\d+\.\d+\.\d+(?:-[\w.]+)?)\]").unwrap();
+    let caps = version_re.captures(content)
+        .context("no version heading found in CHANGELOG.md")?;
+    let version_str = caps.get(1).unwrap().as_str();
+    Version::parse(version_str)
+        .context(format!("invalid version in CHANGELOG.md: {version_str}"))
+}
+
+fn oid_hex_short(oid: git2::Oid) -> String {
+    let hex = oid.to_string();
+    hex.get(..7).unwrap_or(&hex).to_string()
 }

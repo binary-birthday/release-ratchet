@@ -40,6 +40,9 @@ pub enum Commands {
     /// Validate commit messages follow conventional commits format.
     Validate(ValidateArgs),
 
+    /// Extract release notes for a version, or generate notes for the next release.
+    Notes(NotesArgs),
+
     /// Cherry-pick commits onto a maintenance branch for backport releases.
     Backport(BackportArgs),
 
@@ -57,6 +60,10 @@ pub struct PrepareArgs {
     /// Override the computed next version (e.g., "2.0.0").
     #[arg(long = "release-version")]
     pub release_version: Option<String>,
+
+    /// Create a pre-release version (e.g., --prerelease alpha → 1.0.0-alpha.1).
+    #[arg(long)]
+    pub prerelease: Option<String>,
 
     /// Print what would happen without making changes.
     #[arg(long, default_value_t = false)]
@@ -109,6 +116,17 @@ pub struct ValidateArgs {
     /// Validate a single message string directly.
     #[arg(long)]
     pub message: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct NotesArgs {
+    /// Version to extract (e.g., "v0.1.0" or "0.1.0"). Omit to generate notes for the next unreleased version.
+    #[arg(name = "VERSION")]
+    pub target_version: Option<String>,
+
+    /// Extract the most recent version section from the changelog.
+    #[arg(long, conflicts_with = "VERSION")]
+    pub latest: bool,
 }
 
 #[derive(Args, Debug)]

@@ -143,7 +143,10 @@ pub fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Confi
 
     if !path.exists() {
         log::info!("No config file found at {}, using defaults", path.display());
-        return Ok(Config::default());
+        return Ok(Config {
+            ecosystems: detect_ecosystems(repo_root),
+            ..Config::default()
+        });
     }
 
     let contents = std::fs::read_to_string(&path).map_err(|e| RatchetError::Config(format!(
@@ -151,10 +154,14 @@ pub fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Confi
         path.display()
     )))?;
 
-    let config: Config = serde_yaml::from_str(&contents).map_err(|e| RatchetError::Config(format!(
+    let mut config: Config = serde_yaml::from_str(&contents).map_err(|e| RatchetError::Config(format!(
         "failed to parse {}: {e}",
         path.display()
     )))?;
+
+    if config.ecosystems.is_empty() {
+        config.ecosystems = detect_ecosystems(repo_root);
+    }
 
     validate_paths(repo_root, &config)?;
     Ok(config)
@@ -196,4 +203,50 @@ fn validate_relative_path(path: &Path, label: &str) -> Result<(), RatchetError> 
         )));
     }
     Ok(())
+}
+
+fn detect_ecosystems(repo_root: &Path) -> Vec<EcosystemConfig> {
+    let mut detected = Vec::new();
+
+    let cargo_path = repo_root.join("Cargo.toml");
+    if cargo_path.exists() && has_toml_version(&cargo_path, "package") {
+        log::info!("auto-detected ecosystem: cargo (Cargo.toml)");
+        detected.push(EcosystemConfig::Cargo {
+            path: default_cargo_path(),
+        });
+    }
+
+    let node_path = repo_root.join("package.json");
+    if node_path.exists() && has_json_version(&node_path) {
+        log::info!("auto-detected ecosystem: node (package.json)");
+        detected.push(EcosystemConfig::Node {
+            path: default_node_path(),
+        });
+    }
+
+    let python_path = repo_root.join("pyproject.toml");
+    if python_path.exists() && has_toml_version(&python_path, "project") {
+        log::info!("auto-detected ecosystem: python (pyproject.toml)");
+        detected.push(EcosystemConfig::Python {
+            path: default_python_path(),
+        });
+    }
+
+    detected
+}
+
+fn has_toml_version(path: &Path, table: &str) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.parse::<toml_edit::DocumentMut>().ok())
+        .and_then(|doc| doc[table]["version"].as_str().map(|_| ()))
+        .is_some()
+}
+
+fn has_json_version(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|json| json["version"].as_str().map(|_| ()))
+        .is_some()
 }

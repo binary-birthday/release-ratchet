@@ -753,3 +753,273 @@ fn backport_multiple_commits() {
     assert!(stderr.contains("fix two"));
     assert!(stderr.contains("Backport complete"));
 }
+
+// ============================================================================
+// Notes
+// ============================================================================
+
+#[test]
+fn notes_extract_specific_version() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: cool feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "notes", "v0.1.0"]));
+    assert!(stdout.contains("## [0.1.0]"));
+    assert!(stdout.contains("cool feature"));
+}
+
+#[test]
+fn notes_extract_without_prefix() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: cool feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "notes", "0.1.0"]));
+    assert!(stdout.contains("## [0.1.0]"));
+}
+
+#[test]
+fn notes_latest() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: first");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+    commit(&repo, dir.path(), "b.txt", "y", "fix: second");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "notes", "--latest"]));
+    assert!(stdout.contains("## [0.1.1]"));
+    assert!(stdout.contains("second"));
+    assert!(!stdout.contains("first"));
+}
+
+#[test]
+fn notes_generate_next() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: upcoming feature");
+
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "notes"]));
+    assert!(stdout.contains("## [0.1.0]"));
+    assert!(stdout.contains("upcoming feature"));
+    // Should NOT have created a changelog file
+    assert!(!dir.path().join("CHANGELOG.md").exists());
+}
+
+#[test]
+fn notes_missing_version_exits_1() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+
+    let output = binary()
+        .args(["--repo", dir.path().to_str().unwrap(), "notes", "v9.9.9"])
+        .output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
+fn notes_nothing_to_release_exits_2() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "chore: nothing releasable");
+
+    let output = binary()
+        .args(["--repo", dir.path().to_str().unwrap(), "notes"])
+        .output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+}
+
+// ============================================================================
+// Pre-release
+// ============================================================================
+
+#[test]
+fn prerelease_first_alpha() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: new feature");
+    let (_, stderr) = run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "prepare", "--no-branch", "--prerelease", "alpha",
+    ]));
+    assert!(stderr.contains("0.1.0-alpha.1"), "expected alpha.1: {stderr}");
+
+    // Verify the commit message
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert!(head.message().unwrap().contains("v0.1.0-alpha.1"));
+}
+
+#[test]
+fn prerelease_increment() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: new feature");
+
+    // First alpha
+    run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "prepare", "--no-branch", "--prerelease", "alpha",
+    ]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    // Second alpha (add another commit)
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    commit(&repo, dir.path(), "b.txt", "y", "fix: fix something");
+    let (_, stderr) = run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "prepare", "--no-branch", "--prerelease", "alpha",
+    ]));
+    assert!(stderr.contains("0.1.0-alpha.2"), "expected alpha.2: {stderr}");
+}
+
+#[test]
+fn prerelease_switch_id_resets() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: new feature");
+
+    // alpha.1
+    run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "prepare", "--no-branch", "--prerelease", "alpha",
+    ]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    // Switch to beta → beta.1 (not beta.2)
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    commit(&repo, dir.path(), "b.txt", "y", "fix: fix");
+    let (_, stderr) = run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "prepare", "--no-branch", "--prerelease", "beta",
+    ]));
+    assert!(stderr.contains("0.1.0-beta.1"), "expected beta.1: {stderr}");
+}
+
+#[test]
+fn prerelease_stable_promotion() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: new feature");
+
+    // Create pre-release
+    run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "prepare", "--no-branch", "--prerelease", "rc",
+    ]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    // Promote to stable (no --prerelease flag)
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    commit(&repo, dir.path(), "b.txt", "y", "fix: last fix before stable");
+    let (_, stderr) = run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "prepare", "--no-branch",
+    ]));
+    assert!(stderr.contains("-> 0.1.0 (stable promotion)"), "expected stable promotion: {stderr}");
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    // Both tags should exist
+    let repo = Repository::open(dir.path()).unwrap();
+    assert!(repo.refname_to_id("refs/tags/v0.1.0-rc.1").is_ok());
+    assert!(repo.refname_to_id("refs/tags/v0.1.0").is_ok());
+}
+
+#[test]
+fn prerelease_full_cycle() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat!: breaking change");
+
+    // alpha.1, alpha.2, beta.1, rc.1, stable
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch", "--prerelease", "alpha"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    commit(&repo, dir.path(), "b.txt", "y", "fix: alpha fix");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch", "--prerelease", "alpha"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    commit(&repo, dir.path(), "c.txt", "z", "fix: beta fix");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch", "--prerelease", "beta"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    commit(&repo, dir.path(), "d.txt", "w", "fix: rc fix");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch", "--prerelease", "rc"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    // Promote to stable
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    commit(&repo, dir.path(), "e.txt", "v", "fix: final fix");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    // All tags should exist
+    let repo = Repository::open(dir.path()).unwrap();
+    assert!(repo.refname_to_id("refs/tags/v1.0.0-alpha.1").is_ok());
+    assert!(repo.refname_to_id("refs/tags/v1.0.0-alpha.2").is_ok());
+    assert!(repo.refname_to_id("refs/tags/v1.0.0-beta.1").is_ok());
+    assert!(repo.refname_to_id("refs/tags/v1.0.0-rc.1").is_ok());
+    assert!(repo.refname_to_id("refs/tags/v1.0.0").is_ok());
+}
+
+// ============================================================================
+// Ecosystem auto-detection
+// ============================================================================
+
+#[test]
+fn autodetect_cargo_and_node() {
+    let (dir, repo) = init_repo();
+    // Config with no ecosystems listed
+    write_config(dir.path(), "tag_prefix: \"v\"\nmain_branch: \"main\"\n");
+    write_cargo_toml(dir.path(), "0.0.0");
+    write_package_json(dir.path(), "0.0.0");
+    commit_initial_files(&repo, dir.path(), &[".release-ratchet.yml", "Cargo.toml", "package.json"]);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: add feature");
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+
+    let cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+    assert!(cargo.contains("version = \"0.1.0\""), "Cargo.toml not bumped: {cargo}");
+    let pkg = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
+    assert!(pkg.contains("\"0.1.0\""), "package.json not bumped: {pkg}");
+}
+
+#[test]
+fn autodetect_no_config_file() {
+    let (dir, repo) = init_repo();
+    // No .release-ratchet.yml at all
+    write_cargo_toml(dir.path(), "0.0.0");
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml"]);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: add feature");
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+
+    let cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+    assert!(cargo.contains("version = \"0.1.0\""), "Cargo.toml not bumped: {cargo}");
+}
+
+#[test]
+fn autodetect_skipped_when_ecosystems_configured() {
+    let (dir, repo) = init_repo();
+    // Config explicitly lists only node
+    write_config(dir.path(), "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: node\n    path: \"package.json\"\n");
+    write_cargo_toml(dir.path(), "0.0.0");
+    write_package_json(dir.path(), "0.0.0");
+    commit_initial_files(&repo, dir.path(), &[".release-ratchet.yml", "Cargo.toml", "package.json"]);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: add feature");
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+
+    // Node should be bumped (explicitly configured)
+    let pkg = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
+    assert!(pkg.contains("\"0.1.0\""), "package.json not bumped");
+    // Cargo should NOT be bumped (not in explicit config, auto-detect skipped)
+    let cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+    assert!(cargo.contains("version = \"0.0.0\""), "Cargo.toml should not be bumped: {cargo}");
+}

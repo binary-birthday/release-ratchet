@@ -58,6 +58,10 @@ fn run(cli: Cli) -> Result<()> {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
             commands::validate::execute(&repo_path, &config, args)
         }
+        Commands::Notes(args) => {
+            let config = config::load_config(&repo_path, cli.config.as_deref())?;
+            commands::notes::execute(&repo_path, &config, args)
+        }
         Commands::Backport(args) => {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
             commands::backport::execute(&repo_path, &config, args)

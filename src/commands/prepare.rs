@@ -8,7 +8,8 @@ use crate::cli::{BumpOverride, PrepareArgs};
 use crate::config::Config;
 use crate::error::ExitCode;
 use crate::git::{branch, commits, repo, tags};
-use crate::semver_bump::{self, BumpLevel, apply_bump};
+use crate::git::tags::TagFilter;
+use crate::semver_bump::{self, BumpLevel, apply_bump, base_version, compute_prerelease_version};
 use crate::version::bumper;
 
 pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs) -> Result<()> {
@@ -68,14 +69,60 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs) -> Result<(
         semver_bump::determine_bump(&collection.conventional, config)
     };
 
-    if bump == BumpLevel::None {
+    if bump == BumpLevel::None && args.prerelease.is_none() {
+        // Check for stable promotion: is the latest reachable tag a pre-release?
+        let any_tag = tags::find_latest_tag(&repository, &config.tag_prefix, TagFilter::Any)
+            .context("failed to search tags")?;
+        if let Some(ref tag) = any_tag {
+            if !tag.version.pre.is_empty() {
+                // Promote pre-release to stable
+                let next_version = base_version(&tag.version);
+                eprintln!("{} -> {next_version} (stable promotion)", tag.version);
+                return execute_with_version(
+                    repo_path, config, &args, &repository,
+                    &collection.conventional, &next_version,
+                );
+            }
+        }
         eprintln!("No releasable commits found (only non-bumping types like chore, docs, etc.).");
         return Err(ExitCode::NothingToRelease.into());
     }
 
     // 4. Compute next version
-    let next_version = apply_bump(&last_version, bump);
-    eprintln!("{last_version} -> {next_version} ({bump})");
+    let next_version = if let Some(ref prerelease_id) = args.prerelease {
+        if bump == BumpLevel::None {
+            eprintln!("No releasable commits found (only non-bumping types like chore, docs, etc.).");
+            return Err(ExitCode::NothingToRelease.into());
+        }
+        let tentative_base = apply_bump(&last_version, bump);
+        let latest_pre = tags::find_latest_tag(
+            &repository, &config.tag_prefix,
+            TagFilter::PrereleasesOf(tentative_base.clone()),
+        ).context("failed to search pre-release tags")?;
+        let pre_version = latest_pre.as_ref().map(|t| &t.version);
+        let next = compute_prerelease_version(&last_version, pre_version, bump, prerelease_id);
+        eprintln!("{last_version} -> {next} (pre-release)");
+        next
+    } else {
+        // Check for stable promotion from pre-release
+        let any_tag = tags::find_latest_tag(&repository, &config.tag_prefix, TagFilter::Any)
+            .context("failed to search tags")?;
+        if let Some(ref tag) = any_tag {
+            if !tag.version.pre.is_empty() {
+                let next = base_version(&tag.version);
+                eprintln!("{} -> {next} (stable promotion)", tag.version);
+                next
+            } else {
+                let next = apply_bump(&last_version, bump);
+                eprintln!("{last_version} -> {next} ({bump})");
+                next
+            }
+        } else {
+            let next = apply_bump(&last_version, bump);
+            eprintln!("{last_version} -> {next} ({bump})");
+            next
+        }
+    };
 
     execute_with_version(
         repo_path,

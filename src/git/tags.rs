@@ -9,9 +9,20 @@ pub struct ReleaseTag {
     pub oid: git2::Oid,
 }
 
-pub fn find_latest_release_tag(
+pub enum TagFilter {
+    /// Only stable releases (no pre-release segment).
+    StableOnly,
+    /// Only pre-releases whose base version (major.minor.patch) matches.
+    PrereleasesOf(Version),
+    /// Any valid semver tag (stable or pre-release), highest wins.
+    Any,
+}
+
+/// Find the latest release tag matching the filter, reachable from HEAD.
+pub fn find_latest_tag(
     repo: &Repository,
     tag_prefix: &str,
+    filter: TagFilter,
 ) -> Result<Option<ReleaseTag>, RatchetError> {
     let pattern = format!("{tag_prefix}*");
     let tag_names = repo.tag_names(Some(&pattern))?;
@@ -42,16 +53,30 @@ pub fn find_latest_release_tag(
             Err(_) => continue,
         };
 
-        // Skip pre-release tags (e.g., v1.0.0-rc.1) -- only consider stable releases
-        if !version.pre.is_empty() {
-            log::debug!("skipping pre-release tag: {tag_name}");
-            continue;
+        // Apply filter
+        match &filter {
+            TagFilter::StableOnly => {
+                if !version.pre.is_empty() {
+                    continue;
+                }
+            }
+            TagFilter::PrereleasesOf(base) => {
+                if version.pre.is_empty() {
+                    continue;
+                }
+                if version.major != base.major
+                    || version.minor != base.minor
+                    || version.patch != base.patch
+                {
+                    continue;
+                }
+            }
+            TagFilter::Any => {}
         }
 
         let ref_name = format!("refs/tags/{tag_name}");
         let oid = match repo.refname_to_id(&ref_name) {
             Ok(oid) => {
-                // Peel through annotated tags to the commit
                 match repo
                     .find_object(oid, None)
                     .and_then(|obj| obj.peel(ObjectType::Commit))
@@ -63,16 +88,11 @@ pub fn find_latest_release_tag(
             Err(_) => continue,
         };
 
-        // Only consider tags reachable from HEAD (scopes to current branch).
-        // Uses graph_descendant_of which is O(1) per tag via merge-base,
-        // instead of walking the full history.
         if let Some(head) = head_oid {
             match repo.graph_descendant_of(head, oid) {
                 Ok(true) => {}
                 Ok(false) => {
-                    // Also check if HEAD *is* the tagged commit
                     if head != oid {
-                        log::debug!("skipping tag not reachable from HEAD: {tag_name}");
                         continue;
                     }
                 }
@@ -89,6 +109,14 @@ pub fn find_latest_release_tag(
 
     releases.sort_by(|a, b| b.version.cmp(&a.version));
     Ok(releases.into_iter().next())
+}
+
+/// Convenience wrapper: find latest stable release tag.
+pub fn find_latest_release_tag(
+    repo: &Repository,
+    tag_prefix: &str,
+) -> Result<Option<ReleaseTag>, RatchetError> {
+    find_latest_tag(repo, tag_prefix, TagFilter::StableOnly)
 }
 
 pub fn create_tag(

@@ -87,3 +87,86 @@ pub fn collect_since_tag_bounded(
         non_conventional_count,
     })
 }
+
+/// Collect commits filtered to those that touch files under any of the given path prefixes.
+/// Each prefix should end with `/` (e.g., "packages/core/").
+pub fn collect_since_tag_filtered(
+    repo: &Repository,
+    since_oid: Option<git2::Oid>,
+    path_prefixes: &[String],
+) -> Result<CommitCollection, RatchetError> {
+    if repo.head().is_err() {
+        return Ok(CommitCollection {
+            conventional: Vec::new(),
+            non_conventional_count: 0,
+        });
+    }
+
+    let mut revwalk = repo.revwalk()?;
+    revwalk.push_head()?;
+    revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
+
+    if let Some(oid) = since_oid {
+        revwalk.hide(oid)?;
+    }
+
+    let mut conventional = Vec::new();
+    let mut non_conventional_count = 0;
+
+    for oid_result in revwalk {
+        let oid = oid_result?;
+        let commit = repo.find_commit(oid)?;
+
+        if !commit_touches_any_path(repo, &commit, path_prefixes)? {
+            continue;
+        }
+
+        let message = commit.message().unwrap_or("").to_string();
+        let author = commit.author().name().unwrap_or("Unknown").to_string();
+
+        match parser::parse_commit(oid, &message, &author) {
+            Some(cc) => conventional.push(cc),
+            None => non_conventional_count += 1,
+        }
+    }
+
+    Ok(CommitCollection {
+        conventional,
+        non_conventional_count,
+    })
+}
+
+/// Check if a commit's diff touches any file under any of the given path prefixes.
+fn commit_touches_any_path(
+    repo: &Repository,
+    commit: &git2::Commit,
+    path_prefixes: &[String],
+) -> Result<bool, RatchetError> {
+    let tree = commit.tree()?;
+
+    if commit.parent_count() == 0 {
+        return Ok(path_prefixes.iter().any(|prefix| {
+            tree.get_path(std::path::Path::new(prefix.trim_end_matches('/'))).is_ok()
+        }));
+    }
+
+    let parent_tree = commit.parent(0)?.tree()?;
+    let diff = repo.diff_tree_to_tree(Some(&parent_tree), Some(&tree), None)?;
+
+    for delta in diff.deltas() {
+        for prefix in path_prefixes {
+            if let Some(path) = delta.new_file().path().and_then(|p| p.to_str()) {
+                if path.starts_with(prefix.as_str()) {
+                    return Ok(true);
+                }
+            }
+            if let Some(path) = delta.old_file().path().and_then(|p| p.to_str()) {
+                if path.starts_with(prefix.as_str()) {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
+    Ok(false)
+}

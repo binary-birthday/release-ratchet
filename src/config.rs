@@ -36,6 +36,14 @@ pub struct Config {
 
     #[serde(default)]
     pub hooks: HooksConfig,
+
+    /// When non-empty, activates monorepo mode.
+    #[serde(default)]
+    pub packages: Vec<PackageConfig>,
+
+    /// Shared directories that affect specific packages when changed.
+    #[serde(default)]
+    pub shared_paths: Vec<SharedPathConfig>,
 }
 
 impl Config {
@@ -45,6 +53,10 @@ impl Config {
         } else {
             commit_type.default_bump()
         }
+    }
+
+    pub fn is_monorepo(&self) -> bool {
+        !self.packages.is_empty()
     }
 
     pub fn changelog_heading_for_type(&self, commit_type: &CommitType) -> Option<String> {
@@ -68,6 +80,8 @@ impl Default for Config {
             sign_tags: false,
             cleanup_branch: false,
             hooks: HooksConfig::default(),
+            packages: Vec::new(),
+            shared_paths: Vec::new(),
         }
     }
 }
@@ -105,6 +119,48 @@ pub struct HooksConfig {
     pub post_prepare: Vec<String>,
     #[serde(default)]
     pub post_release: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct PackageConfig {
+    /// Unique name for this package.
+    pub name: String,
+    /// Path prefix for commit attribution (relative to repo root).
+    pub path: PathBuf,
+    /// Tag prefix for this package (e.g., "core-v" → core-v1.2.3).
+    #[serde(default = "default_tag_prefix")]
+    pub tag_prefix: String,
+    /// Path to this package's CHANGELOG.md. Defaults to {path}/CHANGELOG.md.
+    pub changelog_path: Option<PathBuf>,
+    /// Ecosystem files for this package.
+    #[serde(default)]
+    pub ecosystems: Vec<EcosystemConfig>,
+}
+
+impl PackageConfig {
+    pub fn resolved_changelog_path(&self) -> PathBuf {
+        self.changelog_path
+            .clone()
+            .unwrap_or_else(|| self.path.join("CHANGELOG.md"))
+    }
+
+    /// Path prefix with trailing slash for safe prefix matching.
+    pub fn path_prefix(&self) -> String {
+        let s = self.path.to_string_lossy();
+        if s.ends_with('/') {
+            s.to_string()
+        } else {
+            format!("{s}/")
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SharedPathConfig {
+    /// Path prefix (relative to repo root).
+    pub path: PathBuf,
+    /// Package names that are affected when this path changes.
+    pub affects: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -186,6 +242,9 @@ pub fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Confi
     }
 
     validate_paths(repo_root, &config)?;
+    if config.is_monorepo() {
+        validate_monorepo(&config)?;
+    }
     Ok(config)
 }
 
@@ -224,6 +283,43 @@ fn validate_relative_path(path: &Path, label: &str) -> Result<(), RatchetError> 
             path.display()
         )));
     }
+    Ok(())
+}
+
+fn validate_monorepo(config: &Config) -> Result<(), RatchetError> {
+    use std::collections::HashSet;
+
+    let mut names: HashSet<&str> = HashSet::new();
+    let mut prefixes: HashSet<&str> = HashSet::new();
+
+    for pkg in &config.packages {
+        if !names.insert(pkg.name.as_str()) {
+            return Err(RatchetError::Config(format!(
+                "duplicate package name: '{}'", pkg.name
+            )));
+        }
+        if !prefixes.insert(pkg.tag_prefix.as_str()) {
+            return Err(RatchetError::Config(format!(
+                "duplicate tag_prefix: '{}' (used by package '{}')", pkg.tag_prefix, pkg.name
+            )));
+        }
+        if pkg.name.is_empty() {
+            return Err(RatchetError::Config("package name must not be empty".into()));
+        }
+    }
+
+    // Validate shared_paths reference existing package names
+    for shared in &config.shared_paths {
+        for affected in &shared.affects {
+            if !names.contains(affected.as_str()) {
+                return Err(RatchetError::Config(format!(
+                    "shared_path '{}' references unknown package '{affected}'",
+                    shared.path.display()
+                )));
+            }
+        }
+    }
+
     Ok(())
 }
 

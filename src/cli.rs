@@ -22,6 +22,10 @@ pub struct Cli {
     #[arg(long, global = true, default_value_t = false)]
     pub quiet: bool,
 
+    /// In monorepo mode, operate on a single package.
+    #[arg(long, short = 'p', global = true)]
+    pub package: Option<String>,
+
     #[command(subcommand)]
     pub command: Commands,
 }

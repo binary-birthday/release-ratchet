@@ -49,15 +49,27 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Hook(args) => commands::hook::execute(&repo_path, args.action),
         Commands::Prepare(args) => {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
-            commands::prepare::execute(&repo_path, &config, args)
+            if config.is_monorepo() {
+                commands::monorepo::prepare::execute(&repo_path, &config, args, cli.package.as_deref())
+            } else {
+                commands::prepare::execute(&repo_path, &config, args)
+            }
         }
         Commands::Release(args) => {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
-            commands::release::execute(&repo_path, &config, args)
+            if config.is_monorepo() {
+                commands::monorepo::release::execute(&repo_path, &config, args, cli.package.as_deref())
+            } else {
+                commands::release::execute(&repo_path, &config, args)
+            }
         }
         Commands::Status(args) => {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
-            commands::status::execute(&repo_path, &config, args)
+            if config.is_monorepo() {
+                commands::monorepo::status::execute(&repo_path, &config, args, cli.package.as_deref())
+            } else {
+                commands::status::execute(&repo_path, &config, args)
+            }
         }
         Commands::Validate(args) => {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
@@ -65,7 +77,11 @@ fn run(cli: Cli) -> Result<()> {
         }
         Commands::Notes(args) => {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
-            commands::notes::execute(&repo_path, &config, args)
+            if config.is_monorepo() {
+                commands::monorepo::notes::execute(&repo_path, &config, args, cli.package.as_deref())
+            } else {
+                commands::notes::execute(&repo_path, &config, args)
+            }
         }
         Commands::Backport(args) => {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
@@ -73,11 +89,19 @@ fn run(cli: Cli) -> Result<()> {
         }
         Commands::Bump(args) => {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
-            commands::bump::execute(&repo_path, &config, args)
+            if config.is_monorepo() {
+                commands::monorepo::bump::execute(&repo_path, &config, args, cli.package.as_deref())
+            } else {
+                commands::bump::execute(&repo_path, &config, args)
+            }
         }
         Commands::Check(args) => {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
-            commands::check::execute(&repo_path, &config, args)
+            if config.is_monorepo() {
+                commands::monorepo::check::execute(&repo_path, &config, args, cli.package.as_deref())
+            } else {
+                commands::check::execute(&repo_path, &config, args)
+            }
         }
     }
 }

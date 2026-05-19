@@ -1,5 +1,7 @@
 pub mod backport;
 pub mod bump;
+#[allow(unused_imports)]
+pub mod monorepo;
 pub mod check;
 pub mod completions;
 pub mod hook;

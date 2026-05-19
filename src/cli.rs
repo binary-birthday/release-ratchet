@@ -30,26 +30,27 @@ pub struct Cli {
 pub enum Commands {
     /// Analyze commits and prepare a release (changelog, version bump, release branch).
     Prepare(PrepareArgs),
-
     /// After the release branch is merged, tag the merge commit.
     Release(ReleaseArgs),
-
     /// Show current release status: last tag, pending commits, next version.
     Status(StatusArgs),
-
     /// Validate commit messages follow conventional commits format.
     Validate(ValidateArgs),
-
     /// Extract release notes for a version, or generate notes for the next release.
     Notes(NotesArgs),
-
     /// Cherry-pick commits onto a maintenance branch for backport releases.
     Backport(BackportArgs),
-
+    /// Just bump version files (no changelog, commit, or tag).
+    Bump(BumpArgs),
+    /// Verify release consistency (tag matches files, changelog has section).
+    Check(CheckArgs),
+    /// Manage git hooks for commit message validation.
+    Hook(HookArgs),
+    /// Generate shell completion scripts.
+    Completions(CompletionsArgs),
     /// Initialize a .release-ratchet.yml config file with defaults.
     Init(InitArgs),
 }
-
 
 #[derive(Args, Debug)]
 pub struct PrepareArgs {
@@ -87,7 +88,7 @@ pub enum BumpOverride {
 
 #[derive(Args, Debug)]
 pub struct ReleaseArgs {
-    /// The commit (SHA or ref) to tag. Defaults to HEAD of the main branch.
+    /// The commit (SHA or ref) to tag. Defaults to HEAD.
     #[arg(long)]
     pub commit: Option<String>,
 
@@ -98,6 +99,10 @@ pub struct ReleaseArgs {
     /// Override the version to tag.
     #[arg(long = "release-version")]
     pub release_version: Option<String>,
+
+    /// Delete the release branch after tagging.
+    #[arg(long, default_value_t = false)]
+    pub cleanup: bool,
 }
 
 #[derive(Args, Debug)]
@@ -136,18 +141,63 @@ pub struct BackportArgs {
     pub commits: Vec<String>,
 
     /// Tag or branch to backport onto (e.g., "v1.2.0" or "maintain/v1.x").
-    /// If a tag is given, a maintenance branch is created from it.
     #[arg(long)]
     pub onto: String,
 
-    /// Custom maintenance branch name. By default, derived from the tag
-    /// (e.g., v1.2.0 → maintain/v1.2.x).
+    /// Custom maintenance branch name.
     #[arg(long)]
     pub branch: Option<String>,
 
     /// Print what would happen without making changes.
     #[arg(long, default_value_t = false)]
     pub dry_run: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct BumpArgs {
+    /// Override the bump level.
+    #[arg(long, value_enum)]
+    pub bump: Option<BumpOverride>,
+
+    /// Set an exact version.
+    #[arg(long = "release-version")]
+    pub release_version: Option<String>,
+
+    /// Print what would happen without making changes.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct CheckArgs {
+    /// Output in JSON format.
+    #[arg(long, default_value_t = false)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct HookArgs {
+    #[command(subcommand)]
+    pub action: HookAction,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HookAction {
+    /// Install the commit-msg hook.
+    Install {
+        /// Overwrite an existing hook.
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
+    /// Remove the commit-msg hook.
+    Uninstall,
+}
+
+#[derive(Args, Debug)]
+pub struct CompletionsArgs {
+    /// Shell to generate completions for.
+    #[arg(value_enum)]
+    pub shell: clap_complete::Shell,
 }
 
 #[derive(Args, Debug)]

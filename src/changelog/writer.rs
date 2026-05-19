@@ -4,7 +4,12 @@ use crate::error::RatchetError;
 
 const CHANGELOG_HEADER: &str = "# Changelog\n\nAll notable changes to this project will be documented in this file.\n";
 
-pub fn update_changelog(path: &Path, new_section: &str) -> Result<String, RatchetError> {
+pub fn update_changelog(
+    path: &Path,
+    new_section: &str,
+    remote_url: Option<&str>,
+    tag_prefix: &str,
+) -> Result<String, RatchetError> {
     let existing = if path.exists() {
         std::fs::read_to_string(path)
             .map_err(|e| RatchetError::Changelog(format!("failed to read {}: {e}", path.display())))?
@@ -12,7 +17,13 @@ pub fn update_changelog(path: &Path, new_section: &str) -> Result<String, Ratche
         CHANGELOG_HEADER.to_string()
     };
 
-    Ok(insert_section(&existing, new_section))
+    let mut result = insert_section(&existing, new_section);
+
+    if let Some(base_url) = remote_url {
+        result = append_compare_links(&result, base_url, tag_prefix);
+    }
+
+    Ok(result)
 }
 
 pub fn write_changelog(path: &Path, contents: &str) -> Result<(), RatchetError> {
@@ -31,6 +42,49 @@ fn insert_section(existing: &str, new_section: &str) -> String {
         let trimmed = existing.trim_end();
         format!("{trimmed}\n\n{new_section}")
     }
+}
+
+fn append_compare_links(content: &str, base_url: &str, tag_prefix: &str) -> String {
+    use regex::Regex;
+
+    // Extract all version numbers from ## [X.Y.Z] headings
+    let re = Regex::new(r"## \[(\d+\.\d+\.\d+(?:-[\w.]+)?)\]").unwrap();
+    let versions: Vec<&str> = re.captures_iter(content).map(|c| c.get(1).unwrap().as_str()).collect();
+
+    if versions.is_empty() {
+        return content.to_string();
+    }
+
+    // Strip any existing link block (lines starting with [ at the end of file)
+    let trimmed = content.trim_end();
+    let mut lines: Vec<&str> = trimmed.lines().collect();
+    while let Some(last) = lines.last() {
+        if (last.starts_with('[') && last.contains("]: http")) || last.trim().is_empty() {
+            lines.pop();
+        } else {
+            break;
+        }
+    }
+
+    let mut result = lines.join("\n");
+    result.push_str("\n\n");
+
+    // Generate compare links: newest first
+    for (i, version) in versions.iter().enumerate() {
+        if i + 1 < versions.len() {
+            let prev = versions[i + 1];
+            result.push_str(&format!(
+                "[{version}]: {base_url}/compare/{tag_prefix}{prev}...{tag_prefix}{version}\n"
+            ));
+        } else {
+            // Oldest version: link to the tag itself
+            result.push_str(&format!(
+                "[{version}]: {base_url}/releases/tag/{tag_prefix}{version}\n"
+            ));
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]

@@ -46,6 +46,20 @@ pub fn execute(repo_path: &Path, config: &Config, args: ReleaseArgs) -> Result<(
     eprintln!("Created tag '{tag_name}' at {short_oid}");
     eprintln!("Run `git push origin {tag_name}` to publish.");
 
+    // Branch cleanup
+    if args.cleanup || config.cleanup_branch {
+        if let Err(e) = crate::git::branch::delete_branch(&repository, &config.release_branch) {
+            log::warn!("failed to delete release branch: {e}");
+        } else {
+            eprintln!("Deleted branch '{}'", config.release_branch);
+        }
+    }
+
+    // Post-release hooks
+    if !config.hooks.post_release.is_empty() {
+        crate::hooks::run_hooks(&config.hooks.post_release, repo_path, &version.to_string());
+    }
+
     Ok(())
 }
 

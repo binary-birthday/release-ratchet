@@ -75,7 +75,8 @@ fn generate_next(repo_path: &Path, config: &Config) -> Result<()> {
     }
 
     let next_version = apply_bump(&last_version, bump);
-    let section = generator::generate_section(&next_version, &collection.conventional, config);
+    let remote_url = crate::git::remote::get_remote_url(&repository);
+    let section = generator::generate_section(&next_version, &collection.conventional, config, remote_url.as_deref());
     print!("{section}");
     Ok(())
 }

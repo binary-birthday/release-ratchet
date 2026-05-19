@@ -143,7 +143,8 @@ fn execute_with_version(
     next_version: &Version,
 ) -> Result<()> {
     // 5. Generate changelog section
-    let section = generator::generate_section(next_version, conventional_commits, config);
+    let remote_url = crate::git::remote::get_remote_url(repository);
+    let section = generator::generate_section(next_version, conventional_commits, config, remote_url.as_deref());
 
     // Collect all files that will be modified (filter to files that exist on disk)
     let mut files_to_modify = vec![config.changelog_path.clone()];
@@ -199,13 +200,16 @@ fn execute_with_version(
     );
 
     if let Err(ref e) = result {
-        // Attempt to restore the original branch on failure
         if let Some(ref refname) = original_head {
             log::warn!("prepare failed, restoring original branch: {e:#}");
             if let Err(restore_err) = restore_head(repository, refname) {
                 log::error!("failed to restore original branch: {restore_err}");
             }
         }
+    }
+
+    if result.is_ok() && !args.dry_run && !config.hooks.post_prepare.is_empty() {
+        crate::hooks::run_hooks(&config.hooks.post_prepare, repo_path, &next_version.to_string());
     }
 
     result
@@ -221,9 +225,11 @@ fn apply_release_changes(
     no_branch: bool,
 ) -> Result<()> {
     // 7. Update CHANGELOG.md (now on the release branch)
+    let remote_url = crate::git::remote::get_remote_url(repository);
     let changelog_full_path = repo_path.join(&config.changelog_path);
-    let updated_changelog = writer::update_changelog(&changelog_full_path, section)
-        .context("failed to update changelog")?;
+    let updated_changelog = writer::update_changelog(
+        &changelog_full_path, section, remote_url.as_deref(), &config.tag_prefix,
+    ).context("failed to update changelog")?;
     writer::write_changelog(&changelog_full_path, &updated_changelog)
         .context("failed to write changelog")?;
 

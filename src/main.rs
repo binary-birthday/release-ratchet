@@ -5,6 +5,7 @@ mod config;
 mod conventional;
 mod error;
 mod git;
+mod hooks;
 mod semver_bump;
 mod version;
 
@@ -27,7 +28,6 @@ fn main() {
     env_logger::Builder::new().filter_level(log_level).init();
 
     if let Err(err) = run(cli) {
-        // Check if the error is a typed ExitCode (non-error exit)
         if let Some(exit_code) = err.downcast_ref::<ExitCode>() {
             eprintln!("{exit_code}");
             std::process::exit(exit_code.code());
@@ -42,6 +42,11 @@ fn run(cli: Cli) -> Result<()> {
 
     match cli.command {
         Commands::Init(args) => commands::init::execute(&repo_path, args),
+        Commands::Completions(args) => {
+            commands::completions::execute(args);
+            Ok(())
+        }
+        Commands::Hook(args) => commands::hook::execute(&repo_path, args.action),
         Commands::Prepare(args) => {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
             commands::prepare::execute(&repo_path, &config, args)
@@ -65,6 +70,14 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Backport(args) => {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
             commands::backport::execute(&repo_path, &config, args)
+        }
+        Commands::Bump(args) => {
+            let config = config::load_config(&repo_path, cli.config.as_deref())?;
+            commands::bump::execute(&repo_path, &config, args)
+        }
+        Commands::Check(args) => {
+            let config = config::load_config(&repo_path, cli.config.as_deref())?;
+            commands::check::execute(&repo_path, &config, args)
         }
     }
 }

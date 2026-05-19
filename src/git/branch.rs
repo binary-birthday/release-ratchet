@@ -20,3 +20,13 @@ pub fn create_and_checkout(repo: &Repository, name: &str) -> Result<(), RatchetE
 
     Ok(())
 }
+
+pub fn delete_branch(repo: &Repository, name: &str) -> Result<(), RatchetError> {
+    match repo.find_branch(name, git2::BranchType::Local) {
+        Ok(mut branch) => {
+            branch.delete()?;
+            Ok(())
+        }
+        Err(_) => Ok(()), // branch doesn't exist, nothing to do
+    }
+}

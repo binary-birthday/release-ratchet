@@ -30,6 +30,12 @@ pub struct Config {
 
     #[serde(default)]
     pub sign_tags: bool,
+
+    #[serde(default)]
+    pub cleanup_branch: bool,
+
+    #[serde(default)]
+    pub hooks: HooksConfig,
 }
 
 impl Config {
@@ -60,6 +66,8 @@ impl Default for Config {
             ecosystems: Vec::new(),
             commit_type_overrides: HashMap::new(),
             sign_tags: false,
+            cleanup_branch: false,
+            hooks: HooksConfig::default(),
         }
     }
 }
@@ -89,6 +97,14 @@ impl BumpLevelConfig {
             Self::None => BumpLevel::None,
         }
     }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct HooksConfig {
+    #[serde(default)]
+    pub post_prepare: Vec<String>,
+    #[serde(default)]
+    pub post_release: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

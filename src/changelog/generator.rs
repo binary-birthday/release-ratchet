@@ -10,8 +10,9 @@ pub fn generate_section(
     version: &Version,
     commits: &[ConventionalCommit],
     config: &Config,
+    remote_url: Option<&str>,
 ) -> String {
-    generate_section_with_date(version, commits, config, None)
+    generate_section_with_date(version, commits, config, None, remote_url)
 }
 
 pub fn generate_section_with_date(
@@ -19,6 +20,7 @@ pub fn generate_section_with_date(
     commits: &[ConventionalCommit],
     config: &Config,
     date_override: Option<&str>,
+    remote_url: Option<&str>,
 ) -> String {
     let today = Local::now().format("%Y-%m-%d").to_string();
     let date = date_override.unwrap_or(&today);
@@ -30,7 +32,7 @@ pub fn generate_section_with_date(
     if !breaking.is_empty() {
         out.push_str("\n### BREAKING CHANGES\n\n");
         for c in &breaking {
-            out.push_str(&format_entry(c));
+            out.push_str(&format_entry(c, remote_url));
         }
     }
 
@@ -59,7 +61,7 @@ pub fn generate_section_with_date(
         if let Some(entries) = groups.remove(heading) {
             out.push_str(&format!("\n### {heading}\n\n"));
             for c in entries {
-                out.push_str(&format_entry(c));
+                out.push_str(&format_entry(c, remote_url));
             }
         }
     }
@@ -67,23 +69,23 @@ pub fn generate_section_with_date(
     for (heading, entries) in &groups {
         out.push_str(&format!("\n### {heading}\n\n"));
         for c in entries {
-            out.push_str(&format_entry(c));
+            out.push_str(&format_entry(c, remote_url));
         }
     }
 
     out
 }
 
-fn format_entry(commit: &ConventionalCommit) -> String {
+fn format_entry(commit: &ConventionalCommit, remote_url: Option<&str>) -> String {
     let scope_prefix = match &commit.scope {
         Some(s) => format!("**{s}**: "),
         None => String::new(),
     };
-    let mut entry = format!(
-        "- {scope_prefix}{} ({})\n",
-        commit.description,
-        commit.short_oid()
-    );
+    let oid_ref = match remote_url {
+        Some(base) => format!("[{}]({}/commit/{})", commit.short_oid(), base, commit.oid),
+        None => format!("({})", commit.short_oid()),
+    };
+    let mut entry = format!("- {scope_prefix}{} {oid_ref}\n", commit.description);
     // Include body for breaking changes to provide migration context
     if commit.is_breaking() {
         if let Some(ref body) = commit.body {
@@ -128,7 +130,7 @@ mod tests {
             make_commit(CommitType::Feat, Some("auth"), "add OAuth support", false),
             make_commit(CommitType::Fix, None, "fix null pointer", false),
         ];
-        let section = generate_section(&Version::new(1, 1, 0), &commits, &config);
+        let section = generate_section(&Version::new(1, 1, 0), &commits, &config, None);
         assert!(section.contains("## [1.1.0]"));
         assert!(section.contains("### Features"));
         assert!(section.contains("**auth**: add OAuth support"));
@@ -142,7 +144,7 @@ mod tests {
         let commits = vec![
             make_commit(CommitType::Feat, Some("api"), "remove old endpoint", true),
         ];
-        let section = generate_section(&Version::new(2, 0, 0), &commits, &config);
+        let section = generate_section(&Version::new(2, 0, 0), &commits, &config, None);
         assert!(section.contains("### BREAKING CHANGES"));
         assert!(section.contains("### Features"));
     }
@@ -154,8 +156,31 @@ mod tests {
             make_commit(CommitType::Chore, None, "update deps", false),
             make_commit(CommitType::Ci, None, "fix pipeline", false),
         ];
-        let section = generate_section(&Version::new(1, 0, 1), &commits, &config);
-        // Should only have the version header, no type sections
+        let section = generate_section(&Version::new(1, 0, 1), &commits, &config, None);
         assert!(!section.contains("###"));
+    }
+
+    #[test]
+    fn commit_links_with_remote() {
+        let config = Config::default();
+        let commits = vec![
+            make_commit(CommitType::Feat, None, "add thing", false),
+        ];
+        let section = generate_section(
+            &Version::new(1, 0, 0), &commits, &config,
+            Some("https://github.com/user/repo"),
+        );
+        assert!(section.contains("[abcdef1](https://github.com/user/repo/commit/"));
+    }
+
+    #[test]
+    fn no_commit_links_without_remote() {
+        let config = Config::default();
+        let commits = vec![
+            make_commit(CommitType::Feat, None, "add thing", false),
+        ];
+        let section = generate_section(&Version::new(1, 0, 0), &commits, &config, None);
+        assert!(section.contains("(abcdef1)"));
+        assert!(!section.contains("[abcdef1]"));
     }
 }

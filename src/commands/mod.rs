@@ -1,4 +1,8 @@
 pub mod backport;
+pub mod bump;
+pub mod check;
+pub mod completions;
+pub mod hook;
 pub mod init;
 pub mod notes;
 pub mod prepare;

@@ -290,6 +290,183 @@ release-ratchet release
 
 ## CI integration
 
+release-ratchet creates commits and tags locally. Your CI pipeline needs to push those back to the remote. That means configuring git auth in CI.
+
+### GitHub Actions
+
+```yaml
+# .github/workflows/release.yml
+name: Release
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for commit analysis
+
+      - name: Install release-ratchet
+        run: curl -fsSL https://raw.githubusercontent.com/binary-birthday/release-ratchet/main/install.sh | sh
+
+      - name: Prepare release
+        id: prepare
+        run: |
+          release-ratchet prepare --no-branch || exit 0
+          release-ratchet release
+          echo "released=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push tag
+        if: steps.prepare.outputs.released == 'true'
+        run: git push && git push --tags
+
+      - name: Create GitHub release
+        if: steps.prepare.outputs.released == 'true'
+        run: |
+          TAG=$(git describe --tags --abbrev=0)
+          release-ratchet notes --latest | gh release create "$TAG" --notes-file -
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+The `GITHUB_TOKEN` is provided automatically by Actions — no setup needed.
+
+### GitLab CI
+
+```yaml
+# .gitlab-ci.yml
+stages:
+  - test
+  - release
+
+test:
+  stage: test
+  image: rust:1.86
+  script:
+    - cargo clippy --all-targets
+    - cargo test
+
+release:
+  stage: release
+  image: rust:1.86
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  before_script:
+    # Configure git to push back using the CI job token
+    - git remote set-url origin "https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    - git config user.name "CI"
+    - git config user.email "ci@${CI_SERVER_HOST}"
+    - curl -fsSL https://raw.githubusercontent.com/binary-birthday/release-ratchet/main/install.sh | sh
+  script:
+    - release-ratchet prepare --no-branch || exit 0
+    - release-ratchet release
+    - git push origin HEAD:main --tags
+    - |
+      TAG=$(git describe --tags --abbrev=0)
+      release-ratchet notes --latest > notes.md
+      release-cli create --name "$TAG" --tag-name "$TAG" --description notes.md
+```
+
+`CI_JOB_TOKEN` is provided automatically by GitLab — no setup needed.
+
+### Bitbucket Pipelines
+
+```yaml
+# bitbucket-pipelines.yml
+image: rust:1.86
+
+pipelines:
+  branches:
+    main:
+      - step:
+          name: Test
+          caches:
+            - cargo
+          script:
+            - cargo clippy --all-targets
+            - cargo test
+
+      - step:
+          name: Release
+          caches:
+            - cargo
+          script:
+            # Configure git to push using an app password
+            - git remote set-url origin "https://${BB_USER}:${BB_APP_PASSWORD}@bitbucket.org/${BITBUCKET_REPO_FULL_NAME}.git"
+            - git config user.name "CI"
+            - git config user.email "ci@bitbucket.org"
+            - curl -fsSL https://raw.githubusercontent.com/binary-birthday/release-ratchet/main/install.sh | sh
+            - release-ratchet prepare --no-branch || exit 0
+            - release-ratchet release
+            - git push origin HEAD:main --tags
+
+definitions:
+  caches:
+    cargo:
+      key:
+        files:
+          - Cargo.lock
+      path: target
+```
+
+**Bitbucket setup:** Create an [App Password](https://bitbucket.org/account/settings/app-passwords/) with `Repositories: Write` permission. Add `BB_USER` (your username) and `BB_APP_PASSWORD` as [repository variables](https://support.atlassian.com/bitbucket-cloud/docs/variables-and-secrets/) in Bitbucket settings.
+
+### CircleCI
+
+```yaml
+# .circleci/config.yml
+version: 2.1
+
+orbs:
+  rust: circleci/rust@1.6.1
+
+jobs:
+  test:
+    docker:
+      - image: cimg/rust:1.86
+    steps:
+      - checkout
+      - rust/clippy:
+          flags: --all-targets
+      - rust/test
+
+  release:
+    docker:
+      - image: cimg/rust:1.86
+    steps:
+      - checkout
+      - run:
+          name: Configure git
+          command: |
+            git config user.name "CI"
+            git config user.email "ci@circleci.com"
+      - run:
+          name: Install and run release-ratchet
+          command: |
+            curl -fsSL https://raw.githubusercontent.com/binary-birthday/release-ratchet/main/install.sh | sh
+            release-ratchet prepare --no-branch || exit 0
+            release-ratchet release
+            git push origin HEAD:main --tags
+
+workflows:
+  build-and-release:
+    jobs:
+      - test
+      - release:
+          requires:
+            - test
+          filters:
+            branches:
+              only: main
+```
+
+**CircleCI setup:** CircleCI's GitHub/Bitbucket integration provides push access via the deploy key added during project setup. No extra tokens needed for pushing commits and tags. For creating GitHub Releases, add a `GITHUB_TOKEN` environment variable in [Project Settings → Environment Variables](https://app.circleci.com/).
+
 ### Piping release notes to your forge
 
 ```sh

@@ -6,7 +6,7 @@ orbs:
 jobs:
   test:
     docker:
-      - image: cimg/rust:1.85
+      - image: cimg/rust:1.86
     steps:
       - checkout
       - rust/clippy
@@ -20,7 +20,7 @@ jobs:
         type: string
         default: ""
     docker:
-      - image: cimg/rust:1.85
+      - image: cimg/rust:1.86
     steps:
       - checkout
       - run:

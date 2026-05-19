@@ -3,26 +3,35 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 
 use crate::cli::HookAction;
+use crate::git::repo;
 
 const HOOK_CONTENT: &str = r#"#!/bin/sh
 # Installed by release-ratchet
-exec release-ratchet validate --message "$(cat "$1")"
+exec release-ratchet validate --message "$(cat -- "$1")"
 "#;
 
 const HOOK_MARKER: &str = "release-ratchet";
 
 pub fn execute(repo_path: &Path, action: HookAction) -> Result<()> {
-    let git_dir = repo_path.join(".git");
-    let hooks_dir = git_dir.join("hooks");
+    let repository = repo::open(repo_path).context("failed to open repository")?;
+    let hooks_dir = repository.path().join("hooks");
     let hook_path = hooks_dir.join("commit-msg");
 
     match action {
         HookAction::Install { force } => {
-            if hook_path.exists() && !force {
-                bail!(
-                    "commit-msg hook already exists at {}. Use --force to overwrite.",
-                    hook_path.display()
-                );
+            if hook_path.exists() {
+                let existing = std::fs::read_to_string(&hook_path).unwrap_or_default();
+                if !force {
+                    bail!(
+                        "commit-msg hook already exists at {}. Use --force to overwrite.",
+                        hook_path.display()
+                    );
+                }
+                if !existing.contains(HOOK_MARKER) {
+                    eprintln!(
+                        "warning: overwriting existing commit-msg hook not installed by release-ratchet"
+                    );
+                }
             }
             std::fs::create_dir_all(&hooks_dir)
                 .context("failed to create hooks directory")?;

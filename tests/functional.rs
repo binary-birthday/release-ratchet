@@ -1023,3 +1023,203 @@ fn autodetect_skipped_when_ecosystems_configured() {
     let cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
     assert!(cargo.contains("version = \"0.0.0\""), "Cargo.toml should not be bumped: {cargo}");
 }
+
+// ============================================================================
+// Bump command
+// ============================================================================
+
+#[test]
+fn bump_auto_from_commits() {
+    let (dir, repo) = init_repo();
+    write_cargo_toml(dir.path(), "0.0.0");
+    write_config(dir.path(), CARGO_CONFIG);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "bump"]));
+
+    let cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+    assert!(cargo.contains("version = \"0.1.0\""), "not bumped: {cargo}");
+}
+
+#[test]
+fn bump_with_override() {
+    let (dir, repo) = init_repo();
+    write_cargo_toml(dir.path(), "0.0.0");
+    write_config(dir.path(), CARGO_CONFIG);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit(&repo, dir.path(), "a.txt", "x", "fix: fix");
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "bump", "--bump", "major"]));
+
+    let cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+    assert!(cargo.contains("version = \"1.0.0\""), "not bumped to major: {cargo}");
+}
+
+#[test]
+fn bump_release_version() {
+    let (dir, repo) = init_repo();
+    write_cargo_toml(dir.path(), "0.0.0");
+    write_config(dir.path(), CARGO_CONFIG);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "bump", "--release-version", "3.0.0"]));
+
+    let cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+    assert!(cargo.contains("version = \"3.0.0\""), "not bumped: {cargo}");
+}
+
+#[test]
+fn bump_dry_run_no_changes() {
+    let (dir, repo) = init_repo();
+    write_cargo_toml(dir.path(), "0.0.0");
+    write_config(dir.path(), CARGO_CONFIG);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "bump", "--dry-run"]));
+
+    let cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+    assert!(cargo.contains("version = \"0.0.0\""), "should not modify in dry-run: {cargo}");
+}
+
+#[test]
+fn bump_nothing_to_release_exits_2() {
+    let (dir, repo) = setup_with_config(CARGO_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "chore: nothing");
+
+    let output = binary().args(["--repo", dir.path().to_str().unwrap(), "bump"]).output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+}
+
+// ============================================================================
+// Check command
+// ============================================================================
+
+#[test]
+fn check_consistent_state_passes() {
+    let (dir, repo) = init_repo();
+    write_cargo_toml(dir.path(), "0.0.0");
+    write_config(dir.path(), CARGO_CONFIG);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "check"]));
+}
+
+#[test]
+fn check_version_drift_fails() {
+    let (dir, repo) = init_repo();
+    write_cargo_toml(dir.path(), "0.0.0");
+    write_package_json(dir.path(), "0.0.0");
+    write_config(dir.path(), "tag_prefix: \"v\"\nmain_branch: \"main\"\necosystems:\n  - type: cargo\n    path: \"Cargo.toml\"\n  - type: node\n    path: \"package.json\"\n");
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", "package.json", ".release-ratchet.yml"]);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    // Manually desync package.json
+    write_package_json(dir.path(), "0.0.0");
+
+    let output = binary().args(["--repo", dir.path().to_str().unwrap(), "check"]).output().unwrap();
+    assert!(!output.status.success());
+}
+
+#[test]
+fn check_json_output() {
+    let (dir, repo) = init_repo();
+    write_cargo_toml(dir.path(), "0.0.0");
+    write_config(dir.path(), CARGO_CONFIG);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.yml"]);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "check", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["consistent"], true);
+    assert!(json.get("tag_version").is_some());
+    assert!(json.get("file_versions").is_some());
+    assert!(json.get("errors").is_some());
+}
+
+#[test]
+fn check_no_tag_passes() {
+    let (dir, _repo) = init_repo();
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "check"]));
+}
+
+// ============================================================================
+// Hook command
+// ============================================================================
+
+#[test]
+fn hook_install_and_uninstall() {
+    let (dir, _repo) = init_repo();
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "hook", "install"]));
+
+    let hook_path = dir.path().join(".git/hooks/commit-msg");
+    assert!(hook_path.exists(), "hook should be installed");
+    let content = std::fs::read_to_string(&hook_path).unwrap();
+    assert!(content.contains("release-ratchet"));
+
+    // Uninstall
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "hook", "uninstall"]));
+    assert!(!hook_path.exists(), "hook should be removed");
+}
+
+#[test]
+fn hook_install_refuses_overwrite() {
+    let (dir, _repo) = init_repo();
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "hook", "install"]));
+
+    // Second install without --force should fail
+    let output = binary().args(["--repo", dir.path().to_str().unwrap(), "hook", "install"]).output().unwrap();
+    assert!(!output.status.success());
+}
+
+#[test]
+fn hook_install_force_overwrites() {
+    let (dir, _repo) = init_repo();
+
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "hook", "install"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "hook", "install", "--force"]));
+}
+
+#[test]
+fn hook_uninstall_refuses_foreign_hook() {
+    let (dir, _repo) = init_repo();
+
+    // Write a non-release-ratchet hook
+    let hooks_dir = dir.path().join(".git/hooks");
+    std::fs::create_dir_all(&hooks_dir).unwrap();
+    std::fs::write(hooks_dir.join("commit-msg"), "#!/bin/sh\necho custom hook\n").unwrap();
+
+    let output = binary().args(["--repo", dir.path().to_str().unwrap(), "hook", "uninstall"]).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not installed by release-ratchet"));
+}
+
+// ============================================================================
+// Completions command
+// ============================================================================
+
+#[test]
+fn completions_bash() {
+    let output = binary().args(["completions", "bash"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("release-ratchet"), "should contain the binary name");
+}
+
+#[test]
+fn completions_zsh() {
+    let output = binary().args(["completions", "zsh"]).output().unwrap();
+    assert!(output.status.success());
+}

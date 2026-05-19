@@ -36,6 +36,12 @@ pub fn execute(repo_path: &Path, config: &Config, args: ReleaseArgs) -> Result<(
     if args.dry_run {
         eprintln!("--- DRY RUN ---");
         eprintln!("Would create tag '{tag_name}' at commit {short_oid}");
+        if args.cleanup || config.cleanup_branch {
+            eprintln!("Would delete branch '{}'", config.release_branch);
+        }
+        if !config.hooks.post_release.is_empty() {
+            eprintln!("Would run {} post-release hook(s)", config.hooks.post_release.len());
+        }
         return Ok(());
     }
 
@@ -46,17 +52,27 @@ pub fn execute(repo_path: &Path, config: &Config, args: ReleaseArgs) -> Result<(
     eprintln!("Created tag '{tag_name}' at {short_oid}");
     eprintln!("Run `git push origin {tag_name}` to publish.");
 
-    // Branch cleanup
-    if args.cleanup || config.cleanup_branch {
-        if let Err(e) = crate::git::branch::delete_branch(&repository, &config.release_branch) {
+    // Branch cleanup (explicit dry-run guard for safety under refactoring)
+    if !args.dry_run && (args.cleanup || config.cleanup_branch) {
+        // Check if we're on the release branch — can't delete the checked-out branch
+        let on_release_branch = repository.head()
+            .ok()
+            .and_then(|h| h.shorthand().map(|s| s == config.release_branch))
+            .unwrap_or(false);
+        if on_release_branch {
+            eprintln!(
+                "warning: cannot delete '{}' — it is currently checked out. Switch to '{}' first.",
+                config.release_branch, config.main_branch
+            );
+        } else if let Err(e) = crate::git::branch::delete_branch(&repository, &config.release_branch) {
             log::warn!("failed to delete release branch: {e}");
         } else {
             eprintln!("Deleted branch '{}'", config.release_branch);
         }
     }
 
-    // Post-release hooks
-    if !config.hooks.post_release.is_empty() {
+    // Post-release hooks (explicit dry-run guard)
+    if !args.dry_run && !config.hooks.post_release.is_empty() {
         crate::hooks::run_hooks(&config.hooks.post_release, repo_path, &version.to_string());
     }
 
@@ -105,7 +121,7 @@ fn detect_version_from_commit(
     anyhow::bail!(
         "Could not detect version from commit {}. \
          Use --release-version to specify it explicitly.",
-        oid_hex_short(oid),
+        crate::git::repo::short_oid(oid),
     )
 }
 
@@ -130,9 +146,4 @@ fn detect_version_from_changelog(
     let version_str = caps.get(1).unwrap().as_str();
     Version::parse(version_str)
         .context(format!("invalid version in CHANGELOG.md: {version_str}"))
-}
-
-fn oid_hex_short(oid: git2::Oid) -> String {
-    let hex = oid.to_string();
-    hex.get(..7).unwrap_or(&hex).to_string()
 }

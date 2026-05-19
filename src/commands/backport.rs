@@ -34,9 +34,9 @@ pub fn execute(repo_path: &Path, config: &Config, args: BackportArgs) -> Result<
 
     if args.dry_run {
         eprintln!("--- DRY RUN ---");
-        eprintln!("Would create/checkout branch '{branch_name}' from {}", short_oid(target_oid));
+        eprintln!("Would create/checkout branch '{branch_name}' from {}", crate::git::repo::short_oid(target_oid));
         for (oid, summary) in &commit_oids {
-            eprintln!("Would cherry-pick {} {summary}", short_oid(*oid));
+            eprintln!("Would cherry-pick {} {summary}", crate::git::repo::short_oid(*oid));
         }
         eprintln!(
             "\nAfter cherry-pick, run:\n  \
@@ -72,14 +72,14 @@ pub fn execute(repo_path: &Path, config: &Config, args: BackportArgs) -> Result<
             Some(git2::build::CheckoutBuilder::new().safe()),
         )?;
         repository.set_head(&refname)?;
-        eprintln!("Created branch '{branch_name}' from {}", short_oid(target_oid));
+        eprintln!("Created branch '{branch_name}' from {}", crate::git::repo::short_oid(target_oid));
     }
 
     // 4. Cherry-pick each commit
     for (oid, summary) in &commit_oids {
         cherry_pick(&repository, *oid)
-            .context(format!("failed to cherry-pick {} {summary}", short_oid(*oid)))?;
-        eprintln!("Cherry-picked {} {summary}", short_oid(*oid));
+            .context(format!("failed to cherry-pick {} {summary}", crate::git::repo::short_oid(*oid)))?;
+        eprintln!("Cherry-picked {} {summary}", crate::git::repo::short_oid(*oid));
     }
 
     eprintln!(
@@ -149,12 +149,12 @@ fn cherry_pick(repo: &git2::Repository, oid: git2::Oid) -> Result<(), anyhow::Er
     anyhow::ensure!(
         commit.parent_count() > 0,
         "cannot cherry-pick root commit {} (no parent to diff against)",
-        short_oid(oid),
+        crate::git::repo::short_oid(oid),
     );
     anyhow::ensure!(
         commit.parent_count() == 1,
         "cannot cherry-pick merge commit {} — use the original non-merge commit instead",
-        short_oid(oid),
+        crate::git::repo::short_oid(oid),
     );
 
     // Compute the cherry-pick: apply the diff between parent and commit onto HEAD
@@ -164,7 +164,7 @@ fn cherry_pick(repo: &git2::Repository, oid: git2::Oid) -> Result<(), anyhow::Er
     if index.has_conflicts() {
         anyhow::bail!(
             "cherry-pick of {} has conflicts. Resolve manually, then continue.",
-            short_oid(oid),
+            crate::git::repo::short_oid(oid),
         );
     }
 
@@ -186,7 +186,3 @@ fn cherry_pick(repo: &git2::Repository, oid: git2::Oid) -> Result<(), anyhow::Er
     Ok(())
 }
 
-fn short_oid(oid: git2::Oid) -> String {
-    let hex = oid.to_string();
-    hex.get(..7).unwrap_or(&hex).to_string()
-}

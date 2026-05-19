@@ -48,7 +48,7 @@ fn append_compare_links(content: &str, base_url: &str, tag_prefix: &str) -> Stri
     use regex::Regex;
 
     // Extract all version numbers from ## [X.Y.Z] headings
-    let re = Regex::new(r"## \[(\d+\.\d+\.\d+(?:-[\w.]+)?)\]").unwrap();
+    let re = Regex::new(r"## \[(\d+\.\d+\.\d+(?:-[\w.\-]+)?)\]").unwrap();
     let versions: Vec<&str> = re.captures_iter(content).map(|c| c.get(1).unwrap().as_str()).collect();
 
     if versions.is_empty() {

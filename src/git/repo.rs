@@ -8,6 +8,11 @@ pub fn open(path: &Path) -> Result<Repository, RatchetError> {
     Ok(Repository::open(path)?)
 }
 
+pub fn short_oid(oid: git2::Oid) -> String {
+    let hex = oid.to_string();
+    hex.get(..7).unwrap_or(&hex).to_string()
+}
+
 pub fn resolve_ref(repo: &Repository, refspec: &str) -> Result<git2::Oid, RatchetError> {
     let obj = repo
         .revparse_single(refspec)

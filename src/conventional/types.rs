@@ -116,7 +116,6 @@ impl ConventionalCommit {
     }
 
     pub fn short_oid(&self) -> String {
-        let hex = self.oid.to_string();
-        hex.get(..7).unwrap_or(&hex).to_string()
+        crate::git::repo::short_oid(self.oid)
     }
 }

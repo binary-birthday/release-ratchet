@@ -156,7 +156,7 @@ pub struct BackportArgs {
 #[derive(Args, Debug)]
 pub struct BumpArgs {
     /// Override the bump level.
-    #[arg(long, value_enum)]
+    #[arg(long, value_enum, conflicts_with = "release_version")]
     pub bump: Option<BumpOverride>,
 
     /// Set an exact version.

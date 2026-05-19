@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use crate::changelog::reader;
 use crate::cli::CheckArgs;
 use crate::config::Config;
+use crate::error::ExitCode;
 use crate::git::{repo, tags};
 use crate::version::bumper;
 
@@ -102,7 +103,7 @@ pub fn execute(repo_path: &Path, config: &Config, args: CheckArgs) -> Result<()>
     }
 
     if !consistent {
-        anyhow::bail!("consistency check failed");
+        return Err(ExitCode::ValidationFailed.into());
     }
 
     Ok(())

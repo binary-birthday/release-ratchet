@@ -16,6 +16,9 @@ pub fn find_latest_release_tag(
     let pattern = format!("{tag_prefix}*");
     let tag_names = repo.tag_names(Some(&pattern))?;
 
+    // Build set of commits reachable from HEAD to scope tags to current branch
+    let reachable = reachable_from_head(repo)?;
+
     let mut releases: Vec<ReleaseTag> = Vec::new();
 
     for tag_name_opt in tag_names.iter() {
@@ -55,6 +58,12 @@ pub fn find_latest_release_tag(
             Err(_) => continue,
         };
 
+        // Only consider tags reachable from HEAD (scopes to current branch)
+        if !reachable.contains(&oid) {
+            log::debug!("skipping tag not reachable from HEAD: {tag_name}");
+            continue;
+        }
+
         releases.push(ReleaseTag {
             name: tag_name.to_string(),
             version,
@@ -64,6 +73,23 @@ pub fn find_latest_release_tag(
 
     releases.sort_by(|a, b| b.version.cmp(&a.version));
     Ok(releases.into_iter().next())
+}
+
+/// Collect all commit OIDs reachable from HEAD.
+fn reachable_from_head(repo: &Repository) -> Result<std::collections::HashSet<git2::Oid>, RatchetError> {
+    let mut set = std::collections::HashSet::new();
+    if let Ok(head) = repo.head() {
+        if let Ok(commit) = head.peel_to_commit() {
+            let mut revwalk = repo.revwalk()?;
+            revwalk.push(commit.id())?;
+            for oid in revwalk {
+                if let Ok(oid) = oid {
+                    set.insert(oid);
+                }
+            }
+        }
+    }
+    Ok(set)
 }
 
 pub fn create_tag(

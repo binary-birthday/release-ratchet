@@ -601,3 +601,155 @@ fn changelog_accumulates_correctly() {
     assert!(beta > v011 && beta < v010);
     assert!(alpha > v010);
 }
+
+// ============================================================================
+// Backport
+// ============================================================================
+
+#[test]
+fn backport_dry_run() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+    // Add a fix on main
+    commit(&repo, dir.path(), "b.txt", "y", "fix: critical bugfix");
+    let fix_oid = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+
+    let (_, stderr) = run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "backport", &fix_oid, "--onto", "v0.1.0", "--dry-run",
+    ]));
+    assert!(stderr.contains("DRY RUN"));
+    assert!(stderr.contains("maintain/v0.1.x"));
+    assert!(stderr.contains("critical bugfix"));
+    // Should not have created the branch
+    assert!(repo.find_branch("maintain/v0.1.x", git2::BranchType::Local).is_err());
+}
+
+#[test]
+fn backport_onto_tag_creates_maintenance_branch() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+    // v0.1.0 is tagged. Add a fix on main.
+    commit(&repo, dir.path(), "b.txt", "y", "fix: critical bugfix");
+    let fix_oid = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+
+    run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "backport", &fix_oid, "--onto", "v0.1.0",
+    ]));
+
+    // Should be on maintain/v0.1.x
+    let head = repo.head().unwrap();
+    assert_eq!(head.shorthand().unwrap(), "maintain/v0.1.x");
+
+    // The fix commit should be on this branch
+    let head_commit = head.peel_to_commit().unwrap();
+    assert!(head_commit.message().unwrap().contains("critical bugfix"));
+}
+
+#[test]
+fn backport_then_prepare_and_release() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    let r = dir.path().to_str().unwrap();
+
+    // Release v0.1.0 on main
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", r, "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", r, "release"]));
+
+    // Add a fix on main (after the release)
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    commit(&repo, dir.path(), "b.txt", "y", "fix: security patch");
+    let fix_oid = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+
+    // Backport the fix to v0.1.x line
+    drop(repo);
+    run_ok(binary().args(["--repo", r, "backport", &fix_oid, "--onto", "v0.1.0"]));
+
+    // Prepare and release the backport
+    let (_, stderr) = run_ok(binary().args(["--repo", r, "prepare", "--no-branch"]));
+    assert!(stderr.contains("0.1.0 -> 0.1.1"), "expected 0.1.0 -> 0.1.1, got: {stderr}");
+    run_ok(binary().args(["--repo", r, "release"]));
+
+    // Both tags should exist
+    let repo = Repository::open(dir.path()).unwrap();
+    assert!(repo.refname_to_id("refs/tags/v0.1.0").is_ok());
+    assert!(repo.refname_to_id("refs/tags/v0.1.1").is_ok());
+}
+
+#[test]
+fn backport_onto_existing_branch() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    // First backport creates the branch
+    commit(&repo, dir.path(), "b.txt", "y", "fix: fix one");
+    let fix1 = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+    run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "backport", &fix1, "--onto", "v0.1.0",
+    ]));
+
+    // Go back to main
+    {
+        let obj = repo.revparse_single("refs/heads/main").unwrap();
+        repo.checkout_tree(&obj, Some(git2::build::CheckoutBuilder::new().force())).unwrap();
+        repo.set_head("refs/heads/main").unwrap();
+    }
+
+    // Second backport onto the same maintenance branch (already exists)
+    commit(&repo, dir.path(), "c.txt", "z", "fix: fix two");
+    let fix2 = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+    let (_, stderr) = run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "backport", &fix2, "--onto", "maintain/v0.1.x",
+    ]));
+    assert!(stderr.contains("Checked out existing branch"));
+    assert!(stderr.contains("fix two"));
+}
+
+#[test]
+fn backport_custom_branch_name() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    commit(&repo, dir.path(), "b.txt", "y", "fix: bugfix");
+    let fix_oid = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+
+    run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "backport", &fix_oid, "--onto", "v0.1.0", "--branch", "hotfix/v0.1.1",
+    ]));
+
+    assert_eq!(repo.head().unwrap().shorthand().unwrap(), "hotfix/v0.1.1");
+}
+
+#[test]
+fn backport_multiple_commits() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+
+    commit(&repo, dir.path(), "b.txt", "y", "fix: fix one");
+    let fix1 = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+    commit(&repo, dir.path(), "c.txt", "z", "fix: fix two");
+    let fix2 = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+
+    let (_, stderr) = run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "backport", &fix1, &fix2, "--onto", "v0.1.0",
+    ]));
+    assert!(stderr.contains("fix one"));
+    assert!(stderr.contains("fix two"));
+    assert!(stderr.contains("Backport complete"));
+}

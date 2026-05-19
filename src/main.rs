@@ -49,6 +49,7 @@ fn run(cli: Cli) -> Result<()> {
                 Commands::Release(args) => commands::release::execute(&repo_path, &config, args),
                 Commands::Status(args) => commands::status::execute(&repo_path, &config, args),
                 Commands::Validate(args) => commands::validate::execute(&repo_path, &config, args),
+                Commands::Backport(args) => commands::backport::execute(&repo_path, &config, args),
                 Commands::Init(_) => unreachable!(),
             }
         }

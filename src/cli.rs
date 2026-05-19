@@ -40,9 +40,13 @@ pub enum Commands {
     /// Validate commit messages follow conventional commits format.
     Validate(ValidateArgs),
 
+    /// Cherry-pick commits onto a maintenance branch for backport releases.
+    Backport(BackportArgs),
+
     /// Initialize a .release-ratchet.yml config file with defaults.
     Init(InitArgs),
 }
+
 
 #[derive(Args, Debug)]
 pub struct PrepareArgs {
@@ -105,6 +109,27 @@ pub struct ValidateArgs {
     /// Validate a single message string directly.
     #[arg(long)]
     pub message: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct BackportArgs {
+    /// Commit(s) to cherry-pick (SHAs or refs).
+    #[arg(required = true)]
+    pub commits: Vec<String>,
+
+    /// Tag or branch to backport onto (e.g., "v1.2.0" or "maintain/v1.x").
+    /// If a tag is given, a maintenance branch is created from it.
+    #[arg(long)]
+    pub onto: String,
+
+    /// Custom maintenance branch name. By default, derived from the tag
+    /// (e.g., v1.2.0 → maintain/v1.2.x).
+    #[arg(long)]
+    pub branch: Option<String>,
+
+    /// Print what would happen without making changes.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
 }
 
 #[derive(Args, Debug)]

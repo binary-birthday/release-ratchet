@@ -11,14 +11,13 @@ use crate::git::{repo, tags};
 pub fn execute(repo_path: &Path, config: &Config, args: ReleaseArgs) -> Result<()> {
     let repository = repo::open(repo_path).context("failed to open repository")?;
 
-    // 1. Determine target commit
+    // 1. Determine target commit (HEAD of current branch, not necessarily main)
     let target_oid = if let Some(ref commitish) = args.commit {
         repo::resolve_ref(&repository, commitish)
             .context(format!("failed to resolve '{commitish}'"))?
     } else {
-        let main_ref = format!("refs/heads/{}", config.main_branch);
-        repo::resolve_ref(&repository, &main_ref)
-            .context(format!("failed to resolve '{main_ref}'"))?
+        repo::resolve_ref(&repository, "HEAD")
+            .context("failed to resolve HEAD")?
     };
 
     let oid_hex = target_oid.to_string();

@@ -1,15 +1,14 @@
-//! Pact-style vendor contract tests.
+//! Forge conformance tests.
 //!
 //! release-ratchet is git-vendor-agnostic, but its outputs (tags, branches,
 //! commit messages, changelog) are consumed by git forges. These tests verify
-//! that our outputs conform to what each forge expects.
+//! that our outputs conform to each forge's documented expectations.
 //!
-//! Structure: each forge is a "consumer" with documented expectations.
-//! We run a full prepare+release cycle, then verify every artifact matches
-//! the consumer's contract. If a forge changes their expectations, we update
-//! the contract here and our code catches the drift.
+//! These are conformance/compatibility tests, not true contract tests —
+//! there is no pact file or independent provider verification. The forge
+//! expectations are encoded as assertions based on their public documentation.
 //!
-//! Consumers:
+//! Forges tested:
 //!   - GitHub (Releases, PR merge strategies, Actions tag triggers)
 //!   - GitLab (Releases, MR merge strategies, CI tag pipelines)
 //!   - Bitbucket (tags, PR merge strategies)

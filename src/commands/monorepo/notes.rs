@@ -31,13 +31,12 @@ pub fn execute(repo_path: &Path, config: &Config, args: NotesArgs, package_filte
     }
 
     if let Some(ref version) = args.target_version {
-        let version_str = version.strip_prefix(&config.tag_prefix).unwrap_or(version);
         for pkg in &packages {
             let path = repo_path.join(pkg.resolved_changelog_path());
             let content = std::fs::read_to_string(&path)
                 .context(format!("failed to read {}", path.display()))?;
-            // Also try stripping the package's tag prefix
-            let v = version_str.strip_prefix(&pkg.tag_prefix).unwrap_or(version_str);
+            // Strip the package's tag prefix (not the global one)
+            let v = version.strip_prefix(&pkg.tag_prefix).unwrap_or(version);
             match reader::extract_section(&content, v) {
                 Some(section) => {
                     if packages.len() > 1 { println!("# {}\n", pkg.name); }

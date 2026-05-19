@@ -145,8 +145,12 @@ impl PackageConfig {
     }
 
     /// Path prefix with trailing slash for safe prefix matching.
+    /// "." normalizes to "" (matches all paths — root package).
     pub fn path_prefix(&self) -> String {
         let s = self.path.to_string_lossy();
+        if s == "." || s == "./" {
+            return String::new(); // root package matches everything
+        }
         if s.ends_with('/') {
             s.to_string()
         } else {
@@ -324,6 +328,23 @@ fn validate_monorepo(config: &Config) -> Result<(), RatchetError> {
         }
         if pkg.name.is_empty() {
             return Err(RatchetError::Config("package name must not be empty".into()));
+        }
+    }
+
+    // Check for overlapping package paths
+    let path_prefixes: Vec<(&str, String)> = config.packages.iter()
+        .map(|p| (p.name.as_str(), p.path_prefix()))
+        .collect();
+    for (i, (name_a, prefix_a)) in path_prefixes.iter().enumerate() {
+        for (name_b, prefix_b) in path_prefixes[i + 1..].iter() {
+            if !prefix_a.is_empty() && !prefix_b.is_empty() {
+                if prefix_a.starts_with(prefix_b.as_str()) || prefix_b.starts_with(prefix_a.as_str()) {
+                    return Err(RatchetError::Config(format!(
+                        "overlapping package paths: '{}' ({name_a}) and '{}' ({name_b})",
+                        prefix_a.trim_end_matches('/'), prefix_b.trim_end_matches('/')
+                    )));
+                }
+            }
         }
     }
 

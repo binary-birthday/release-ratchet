@@ -90,8 +90,13 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs) -> Result<(
 
     // Validate pre-release identifier early
     if let Some(ref id) = args.prerelease {
-        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.') {
-            anyhow::bail!("invalid pre-release identifier '{id}': must be non-empty alphanumeric with hyphens/dots");
+        if id.is_empty()
+            || id.starts_with('.')
+            || id.ends_with('.')
+            || id.contains("..")
+            || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+        {
+            anyhow::bail!("invalid pre-release identifier '{id}': must be non-empty alphanumeric segments separated by dots or hyphens");
         }
     }
 

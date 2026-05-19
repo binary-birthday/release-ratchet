@@ -13,7 +13,7 @@ jobs:
           flags: --all-targets
       - rust/test
 
-  build-linux-amd64:
+  build-linux:
     docker:
       - image: cimg/rust:1.86
     steps:
@@ -31,58 +31,22 @@ jobs:
           paths:
             - "*"
 
-  build-macos:
-    parameters:
-      target:
-        type: string
-    macos:
-      xcode: "15.4.0"
-    resource_class: macos.m1.medium.gen1
-    steps:
-      - checkout
-      - run:
-          name: Install Rust
-          command: |
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
-      - run:
-          name: Add target
-          command: rustup target add << parameters.target >>
-      - run:
-          name: Build release binary
-          command: cargo build --release --target << parameters.target >>
-      - run:
-          name: Package binary
-          command: |
-            mkdir -p artifacts
-            cp target/<< parameters.target >>/release/release-ratchet \
-              artifacts/release-ratchet-<< parameters.target >>
-      - persist_to_workspace:
-          root: artifacts
-          paths:
-            - "*"
-
   publish-github-release:
     docker:
-      - image: cimg/base:current
+      - image: cibuilds/github:0.13
     steps:
       - attach_workspace:
           at: artifacts
       - run:
-          name: Install gh CLI
+          name: Publish release on GitHub
           command: |
-            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-            sudo apt update && sudo apt install gh -y
-      - run:
-          name: Create GitHub release with binaries
-          command: |
-            TAG=${CIRCLE_TAG}
-            gh release create "$TAG" \
-              --repo "$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME" \
-              --title "$TAG" \
-              --generate-notes \
-              artifacts/*
+            ghr -t "${GITHUB_TOKEN}" \
+              -u "${CIRCLE_PROJECT_USERNAME}" \
+              -r "${CIRCLE_PROJECT_REPONAME}" \
+              -c "${CIRCLE_SHA1}" \
+              -replace \
+              "${CIRCLE_TAG}" \
+              artifacts/
 
 workflows:
   test:
@@ -94,23 +58,7 @@ workflows:
 
   release:
     jobs:
-      - build-linux-amd64:
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /^v.*/
-      - build-macos:
-          name: build-macos-arm64
-          target: aarch64-apple-darwin
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /^v.*/
-      - build-macos:
-          name: build-macos-amd64
-          target: x86_64-apple-darwin
+      - build-linux:
           filters:
             branches:
               ignore: /.*/
@@ -118,9 +66,7 @@ workflows:
               only: /^v.*/
       - publish-github-release:
           requires:
-            - build-linux-amd64
-            - build-macos-arm64
-            - build-macos-amd64
+            - build-linux
           filters:
             branches:
               ignore: /.*/

@@ -45,9 +45,6 @@ impl Ecosystem for NodeEcosystem {
             }
         })?;
 
-        // Parse to find the exact top-level "version" value, then do a targeted
-        // string replacement at that byte offset. This ensures we modify only the
-        // top-level field (not nested "version" keys) while preserving formatting.
         let json: serde_json::Value = serde_json::from_str(&contents).map_err(|e| {
             RatchetError::VersionFile {
                 path: self.path.display().to_string(),
@@ -61,10 +58,9 @@ impl Ecosystem for NodeEcosystem {
             }
         })?;
 
-        // Find the top-level "version": "..." pattern by searching for the key
-        // followed by the exact old version string. We search for the literal
-        // old value to avoid matching nested occurrences.
-        let (pos, replace_len) = find_version_needle(&contents, old_version)
+        // Find the top-level "version" field by tracking brace depth.
+        // Only match at depth 1 (inside the root object, not nested objects).
+        let (pos, len) = find_toplevel_version_value(&contents, old_version)
             .ok_or_else(|| RatchetError::VersionFile {
                 path: self.path.display().to_string(),
                 reason: format!(
@@ -75,7 +71,7 @@ impl Ecosystem for NodeEcosystem {
         let mut result = String::with_capacity(contents.len());
         result.push_str(&contents[..pos]);
         result.push_str(&version.to_string());
-        result.push_str(&contents[pos + replace_len..]);
+        result.push_str(&contents[pos + len..]);
 
         std::fs::write(&full_path, result.as_bytes()).map_err(|e| {
             RatchetError::VersionFile {
@@ -90,20 +86,51 @@ impl Ecosystem for NodeEcosystem {
     }
 }
 
-/// Find the byte offset and length of the version *value* in the first
-/// top-level `"version": "<value>"` occurrence that matches `old_version`.
-fn find_version_needle(contents: &str, old_version: &str) -> Option<(usize, usize)> {
-    // Try patterns: `"version": "X.Y.Z"`, `"version":"X.Y.Z"`, `"version" : "X.Y.Z"`
-    for pattern in [
-        format!("\"version\": \"{old_version}\""),
-        format!("\"version\":\"{old_version}\""),
-        format!("\"version\" : \"{old_version}\""),
-    ] {
-        if let Some(match_start) = contents.find(&pattern) {
-            // Find the version value within the matched pattern
-            let value_start = match_start + pattern.find(old_version).unwrap();
-            return Some((value_start, old_version.len()));
+/// Find the byte offset and length of the version value string in the
+/// top-level "version" field. Uses brace-depth tracking to skip nested
+/// "version" keys inside sub-objects.
+fn find_toplevel_version_value(contents: &str, old_version: &str) -> Option<(usize, usize)> {
+    let bytes = contents.as_bytes();
+    let needle_key = "\"version\"";
+    let mut depth: i32 = 0;
+    let mut i = 0;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => depth -= 1,
+            b'"' => {
+                // Check if this is the "version" key at depth 1
+                if depth == 1 && contents[i..].starts_with(needle_key) {
+                    // Skip past the key and find the colon + value
+                    let after_key = i + needle_key.len();
+                    // Find the colon
+                    let colon = contents[after_key..].find(':')?;
+                    let after_colon = after_key + colon + 1;
+                    // Find the opening quote of the value
+                    let quote_start = contents[after_colon..].find('"')?;
+                    let value_start = after_colon + quote_start + 1;
+                    // Find the closing quote
+                    let quote_end = contents[value_start..].find('"')?;
+                    let value = &contents[value_start..value_start + quote_end];
+
+                    if value == old_version {
+                        return Some((value_start, quote_end));
+                    }
+                }
+                // Skip the string to avoid counting braces inside strings
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' {
+                        i += 1; // skip escaped char
+                    }
+                    i += 1;
+                }
+            }
+            _ => {}
         }
+        i += 1;
     }
+
     None
 }

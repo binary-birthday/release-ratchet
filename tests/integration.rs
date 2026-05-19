@@ -285,12 +285,15 @@ fn contract_node_with_nested_version_only_bumps_toplevel() {
         .args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
 
     let result = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
-    // Top-level version bumped
-    assert!(result.contains("\"version\": \"0.1.0\""), "top-level not bumped: {result}");
-    // Nested version unchanged — the override still has 0.0.0
-    // Count occurrences of "0.0.0" — should be exactly 1 (the nested one)
-    let count = result.matches("\"0.0.0\"").count();
-    assert_eq!(count, 1, "nested version was incorrectly modified: {result}");
+    // The nested "version" (inside overrides) must still be 0.0.0
+    // The top-level "version" must be 0.1.0
+    // Verify by checking that the LAST "version" field has 0.1.0 (top-level comes after nested)
+    let nested_pos = result.find("\"version\": \"0.0.0\"")
+        .expect("nested version should still be 0.0.0");
+    let toplevel_pos = result.find("\"version\": \"0.1.0\"")
+        .expect("top-level version should be 0.1.0");
+    assert!(nested_pos < toplevel_pos,
+        "nested version (pos {nested_pos}) should appear before top-level (pos {toplevel_pos}) in: {result}");
 }
 
 #[test]

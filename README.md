@@ -290,7 +290,7 @@ release-ratchet release
 
 ## CI integration
 
-release-ratchet creates commits and tags locally. Your CI pipeline needs to push those back to the remote. That means configuring git auth in CI.
+release-ratchet creates commits and tags locally. Your CI pipeline needs to push those back to the remote. Each forge handles auth differently.
 
 ### GitHub Actions
 
@@ -301,32 +301,35 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history for commit analysis
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Install release-ratchet
         run: curl -fsSL https://raw.githubusercontent.com/binary-birthday/release-ratchet/main/install.sh | sh
 
-      - name: Prepare release
-        id: prepare
+      - name: Release
         run: |
           release-ratchet prepare --no-branch || exit 0
           release-ratchet release
-          echo "released=true" >> "$GITHUB_OUTPUT"
+          git push && git push --tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push tag
-        if: steps.prepare.outputs.released == 'true'
-        run: git push && git push --tags
-
-      - name: Create GitHub release
-        if: steps.prepare.outputs.released == 'true'
+      - name: Create GitHub Release
         run: |
           TAG=$(git describe --tags --abbrev=0)
           release-ratchet notes --latest | gh release create "$TAG" --notes-file -
@@ -334,7 +337,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-The `GITHUB_TOKEN` is provided automatically by Actions — no setup needed.
+**Setup:** None. `GITHUB_TOKEN` is provided automatically. `permissions: contents: write` grants push and release access. Pass the token to checkout so pushes use it.
 
 ### GitLab CI
 
@@ -353,26 +356,27 @@ test:
 
 release:
   stage: release
-  image: rust:1.86
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
   rules:
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   before_script:
-    # Configure git to push back using the CI job token
+    - apk add --no-cache curl git
     - git remote set-url origin "https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
-    - git config user.name "CI"
+    - git config user.name "GitLab CI"
     - git config user.email "ci@${CI_SERVER_HOST}"
     - curl -fsSL https://raw.githubusercontent.com/binary-birthday/release-ratchet/main/install.sh | sh
   script:
     - release-ratchet prepare --no-branch || exit 0
     - release-ratchet release
-    - git push origin HEAD:main --tags
-    - |
-      TAG=$(git describe --tags --abbrev=0)
-      release-ratchet notes --latest > notes.md
-      release-cli create --name "$TAG" --tag-name "$TAG" --description notes.md
+    - git push origin HEAD:${CI_DEFAULT_BRANCH} --tags
+    - TAG=$(git describe --tags --abbrev=0)
+    - release-ratchet notes --latest > notes.md
+  release:
+    tag_name: $TAG
+    description: notes.md
 ```
 
-`CI_JOB_TOKEN` is provided automatically by GitLab — no setup needed.
+**Setup:** Go to **Settings → CI/CD → Token Access** and enable **"Allow Git push requests to the repository"** for `CI_JOB_TOKEN`. No personal tokens needed.
 
 ### Bitbucket Pipelines
 
@@ -396,10 +400,9 @@ pipelines:
           caches:
             - cargo
           script:
-            # Configure git to push using an app password
-            - git remote set-url origin "https://${BB_USER}:${BB_APP_PASSWORD}@bitbucket.org/${BITBUCKET_REPO_FULL_NAME}.git"
-            - git config user.name "CI"
-            - git config user.email "ci@bitbucket.org"
+            - git remote set-url origin "https://x-token-auth:${REPOSITORY_ACCESS_TOKEN}@bitbucket.org/${BITBUCKET_REPO_FULL_NAME}.git"
+            - git config user.name "Bitbucket Pipelines"
+            - git config user.email "pipelines@bitbucket.org"
             - curl -fsSL https://raw.githubusercontent.com/binary-birthday/release-ratchet/main/install.sh | sh
             - release-ratchet prepare --no-branch || exit 0
             - release-ratchet release
@@ -414,7 +417,9 @@ definitions:
       path: target
 ```
 
-**Bitbucket setup:** Create an [App Password](https://bitbucket.org/account/settings/app-passwords/) with `Repositories: Write` permission. Add `BB_USER` (your username) and `BB_APP_PASSWORD` as [repository variables](https://support.atlassian.com/bitbucket-cloud/docs/variables-and-secrets/) in Bitbucket settings.
+**Setup:** Create a [Repository Access Token](https://support.atlassian.com/bitbucket-cloud/docs/create-a-repository-access-token/) with **Repositories: Write** permission. Add it as a repository variable named `REPOSITORY_ACCESS_TOKEN` in **Repository Settings → Pipelines → Repository variables**.
+
+> Note: Bitbucket is replacing App Passwords with [API tokens](https://support.atlassian.com/bitbucket-cloud/docs/using-api-tokens/). Repository access tokens are the recommended approach for CI.
 
 ### CircleCI
 
@@ -439,14 +444,17 @@ jobs:
     docker:
       - image: cimg/rust:1.86
     steps:
+      - add_ssh_keys:
+          fingerprints:
+            - "your:deploy:key:fingerprint"
       - checkout
       - run:
           name: Configure git
           command: |
-            git config user.name "CI"
+            git config user.name "CircleCI"
             git config user.email "ci@circleci.com"
       - run:
-          name: Install and run release-ratchet
+          name: Release
           command: |
             curl -fsSL https://raw.githubusercontent.com/binary-birthday/release-ratchet/main/install.sh | sh
             release-ratchet prepare --no-branch || exit 0
@@ -465,7 +473,14 @@ workflows:
               only: main
 ```
 
-**CircleCI setup:** CircleCI's GitHub/Bitbucket integration provides push access via the deploy key added during project setup. No extra tokens needed for pushing commits and tags. For creating GitHub Releases, add a `GITHUB_TOKEN` environment variable in [Project Settings → Environment Variables](https://app.circleci.com/).
+**Setup:** CircleCI's default deploy key is **read-only**. To push commits and tags:
+
+1. Go to **Project Settings → SSH Keys**
+2. Under **Additional SSH Keys**, click **Add SSH Key**
+3. Add a key with write access to your repo ([GitHub instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account))
+4. Copy the fingerprint into the `add_ssh_keys` step above
+
+For creating GitHub Releases, also add a `GITHUB_TOKEN` in **Project Settings → Environment Variables**.
 
 ### Piping release notes to your forge
 

@@ -11,7 +11,17 @@ pub fn generate_section(
     commits: &[ConventionalCommit],
     config: &Config,
 ) -> String {
-    let date = Local::now().format("%Y-%m-%d");
+    generate_section_with_date(version, commits, config, None)
+}
+
+pub fn generate_section_with_date(
+    version: &Version,
+    commits: &[ConventionalCommit],
+    config: &Config,
+    date_override: Option<&str>,
+) -> String {
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    let date = date_override.unwrap_or(&today);
     let mut out = format!("## [{version}] - {date}\n");
 
     // Collect breaking changes across all types

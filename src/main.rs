@@ -12,6 +12,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use cli::{Cli, Commands};
+use error::ExitCode;
 
 fn main() {
     let cli = Cli::parse();
@@ -26,6 +27,11 @@ fn main() {
     env_logger::Builder::new().filter_level(log_level).init();
 
     if let Err(err) = run(cli) {
+        // Check if the error is a typed ExitCode (non-error exit)
+        if let Some(exit_code) = err.downcast_ref::<ExitCode>() {
+            eprintln!("{exit_code}");
+            std::process::exit(exit_code.code());
+        }
         eprintln!("error: {err:#}");
         std::process::exit(1);
     }

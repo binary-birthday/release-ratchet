@@ -26,3 +26,34 @@ pub enum RatchetError {
     #[error("{0}")]
     Other(String),
 }
+
+/// Exit codes that commands can return to signal non-error conditions.
+/// These are distinct from errors -- they indicate "nothing to do" or
+/// "validation failed" rather than unexpected failures.
+#[derive(Debug)]
+pub enum ExitCode {
+    /// Nothing to release (no releasable commits found). Exit code 2.
+    NothingToRelease,
+    /// Validation failed (invalid commit messages). Exit code 1.
+    ValidationFailed,
+}
+
+impl std::fmt::Display for ExitCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NothingToRelease => write!(f, "nothing to release"),
+            Self::ValidationFailed => write!(f, "validation failed"),
+        }
+    }
+}
+
+impl std::error::Error for ExitCode {}
+
+impl ExitCode {
+    pub fn code(&self) -> i32 {
+        match self {
+            Self::NothingToRelease => 2,
+            Self::ValidationFailed => 1,
+        }
+    }
+}

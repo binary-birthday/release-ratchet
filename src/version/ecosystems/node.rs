@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use regex::Regex;
 use semver::Version;
 
 use super::Ecosystem;
@@ -44,21 +45,25 @@ impl Ecosystem for NodeEcosystem {
                 reason: e.to_string(),
             }
         })?;
-        let mut json: serde_json::Value = serde_json::from_str(&contents).map_err(|e| {
+
+        // Use regex replacement to preserve original formatting (indentation, key order, etc.)
+        let re = Regex::new(r#"("version"\s*:\s*")([^"]+)(")"#).map_err(|e| {
             RatchetError::VersionFile {
                 path: self.path.display().to_string(),
-                reason: format!("invalid JSON: {e}"),
+                reason: format!("regex error: {e}"),
             }
         })?;
-        json["version"] = serde_json::Value::String(version.to_string());
-        let output = serde_json::to_string_pretty(&json).map_err(|e| {
-            RatchetError::VersionFile {
+
+        if !re.is_match(&contents) {
+            return Err(RatchetError::VersionFile {
                 path: self.path.display().to_string(),
-                reason: format!("failed to serialize JSON: {e}"),
-            }
-        })?;
-        // Preserve trailing newline convention
-        std::fs::write(&full_path, format!("{output}\n")).map_err(|e| {
+                reason: "could not find \"version\" field in JSON".to_string(),
+            });
+        }
+
+        let result = re.replacen(&contents, 1, format!("${{1}}{version}${{3}}"));
+
+        std::fs::write(&full_path, result.as_bytes()).map_err(|e| {
             RatchetError::VersionFile {
                 path: self.path.display().to_string(),
                 reason: e.to_string(),

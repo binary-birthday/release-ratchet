@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use crate::cli::ValidateArgs;
 use crate::config::Config;
 use crate::conventional::parser;
+use crate::error::ExitCode;
 use crate::git::{commits, repo, tags};
 
 pub fn execute(repo_path: &Path, config: &Config, args: ValidateArgs) -> Result<()> {
@@ -21,34 +22,36 @@ pub fn execute(repo_path: &Path, config: &Config, args: ValidateArgs) -> Result<
             }
             None => {
                 eprintln!("Invalid: not a conventional commit message");
-                std::process::exit(1);
+                return Err(ExitCode::ValidationFailed.into());
             }
         }
     }
 
     let repository = repo::open(repo_path).context("failed to open repository")?;
 
-    let (since_oid, range_desc) = if let Some(ref range) = args.range {
-        if let Some((from, _to)) = range.split_once("..") {
+    let (since_oid, to_oid, range_desc) = if let Some(ref range) = args.range {
+        if let Some((from, to)) = range.split_once("..") {
             let from_oid = repo::resolve_ref(&repository, from)
                 .context(format!("failed to resolve '{from}'"))?;
-            (Some(from_oid), range.clone())
+            let to_oid = repo::resolve_ref(&repository, to)
+                .context(format!("failed to resolve '{to}'"))?;
+            (Some(from_oid), Some(to_oid), range.clone())
         } else {
             let from_oid = repo::resolve_ref(&repository, range)
                 .context(format!("failed to resolve '{range}'"))?;
-            (Some(from_oid), format!("{range}..HEAD"))
+            (Some(from_oid), None, format!("{range}..HEAD"))
         }
     } else {
         let latest = tags::find_latest_release_tag(&repository, &config.tag_prefix)?;
         match latest {
-            Some(tag) => (Some(tag.oid), format!("{}..HEAD", tag.name)),
-            None => (None, "all commits".to_string()),
+            Some(tag) => (Some(tag.oid), None, format!("{}..HEAD", tag.name)),
+            None => (None, None, "all commits".to_string()),
         }
     };
 
     eprintln!("Validating commits in range: {range_desc}");
 
-    let collection = commits::collect_since_tag(&repository, since_oid)?;
+    let collection = commits::collect_since_tag_bounded(&repository, since_oid, to_oid)?;
 
     let total = collection.conventional.len() + collection.non_conventional_count;
 
@@ -67,7 +70,7 @@ pub fn execute(repo_path: &Path, config: &Config, args: ValidateArgs) -> Result<
             "{} commit(s) are NOT valid conventional commits",
             collection.non_conventional_count
         );
-        std::process::exit(1);
+        return Err(ExitCode::ValidationFailed.into());
     }
 
     eprintln!("All commits are valid.");

@@ -34,6 +34,12 @@ pub fn find_latest_release_tag(
             Err(_) => continue,
         };
 
+        // Skip pre-release tags (e.g., v1.0.0-rc.1) -- only consider stable releases
+        if !version.pre.is_empty() {
+            log::debug!("skipping pre-release tag: {tag_name}");
+            continue;
+        }
+
         let ref_name = format!("refs/tags/{tag_name}");
         let oid = match repo.refname_to_id(&ref_name) {
             Ok(oid) => {

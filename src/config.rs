@@ -30,9 +30,6 @@ pub struct Config {
 
     #[serde(default)]
     pub sign_tags: bool,
-
-    #[serde(default)]
-    pub sign_commits: bool,
 }
 
 impl Config {
@@ -63,7 +60,6 @@ impl Default for Config {
             ecosystems: Vec::new(),
             commit_type_overrides: HashMap::new(),
             sign_tags: false,
-            sign_commits: false,
         }
     }
 }

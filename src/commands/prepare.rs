@@ -6,6 +6,7 @@ use semver::Version;
 use crate::changelog::{generator, writer};
 use crate::cli::{BumpOverride, PrepareArgs};
 use crate::config::Config;
+use crate::error::ExitCode;
 use crate::git::{branch, commits, repo, tags};
 use crate::semver_bump::{self, BumpLevel, apply_bump};
 use crate::version::bumper;
@@ -39,11 +40,9 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs) -> Result<(
         );
     }
 
-    if collection.conventional.is_empty() {
-        if args.bump.is_none() && args.release_version.is_none() {
-            eprintln!("No conventional commits found since last release.");
-            std::process::exit(2);
-        }
+    if collection.conventional.is_empty() && args.bump.is_none() && args.release_version.is_none() {
+        eprintln!("No conventional commits found since last release.");
+        return Err(ExitCode::NothingToRelease.into());
     }
 
     // 3. Determine bump level
@@ -51,7 +50,6 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs) -> Result<(
         let next = Version::parse(override_version)
             .context(format!("invalid version override: {override_version}"))?;
         eprintln!("{last_version} -> {next} (manual override)");
-        // Skip bump computation, use the version directly
         return execute_with_version(
             repo_path,
             config,
@@ -72,7 +70,7 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs) -> Result<(
 
     if bump == BumpLevel::None {
         eprintln!("No releasable commits found (only non-bumping types like chore, docs, etc.).");
-        std::process::exit(2);
+        return Err(ExitCode::NothingToRelease.into());
     }
 
     // 4. Compute next version
@@ -114,28 +112,27 @@ fn execute_with_version(
         return Ok(());
     }
 
-    // 6. Update CHANGELOG.md
-    let changelog_full_path = repo_path.join(&config.changelog_path);
-    let updated_changelog = writer::update_changelog(&changelog_full_path, &section)
-        .context("failed to update changelog")?;
-    writer::write_changelog(&changelog_full_path, &updated_changelog)
-        .context("failed to write changelog")?;
-
-    // 7. Bump version in ecosystem files
-    let modified_files = bumper::bump_all(repo_path, &config.ecosystems, next_version)
-        .context("failed to bump version files")?;
-
-    // 8. Create release branch (unless --no-branch)
+    // 6. Create release branch FIRST (before modifying files), unless --no-branch
     let branch_name = args
         .branch
         .as_deref()
         .unwrap_or(&config.release_branch);
 
     if !args.no_branch {
-        // Stash index state, create branch, then commit there
         branch::create_and_checkout(repository, branch_name)
             .context(format!("failed to create branch '{branch_name}'"))?;
     }
+
+    // 7. Update CHANGELOG.md (now on the release branch)
+    let changelog_full_path = repo_path.join(&config.changelog_path);
+    let updated_changelog = writer::update_changelog(&changelog_full_path, &section)
+        .context("failed to update changelog")?;
+    writer::write_changelog(&changelog_full_path, &updated_changelog)
+        .context("failed to write changelog")?;
+
+    // 8. Bump version in ecosystem files
+    let modified_files = bumper::bump_all(repo_path, &config.ecosystems, next_version)
+        .context("failed to bump version files")?;
 
     // 9. Stage and commit
     let mut index = repository.index()?;

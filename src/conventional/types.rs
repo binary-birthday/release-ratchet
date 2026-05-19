@@ -109,6 +109,7 @@ impl ConventionalCommit {
     }
 
     pub fn short_oid(&self) -> String {
-        self.oid.to_string()[..7].to_string()
+        let hex = self.oid.to_string();
+        hex.get(..7).unwrap_or(&hex).to_string()
     }
 }

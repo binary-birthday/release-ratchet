@@ -21,7 +21,8 @@ pub fn execute(repo_path: &Path, config: &Config, args: ReleaseArgs) -> Result<(
             .context(format!("failed to resolve '{main_ref}'"))?
     };
 
-    let short_oid = &target_oid.to_string()[..7];
+    let oid_hex = target_oid.to_string();
+    let short_oid = oid_hex.get(..7).unwrap_or(&oid_hex);
 
     // 2. Determine version to tag
     let version = if let Some(ref v) = args.release_version {
@@ -85,6 +86,6 @@ fn detect_version_from_commit(
 
     anyhow::bail!(
         "Could not detect version from commit {oid}. \
-         Use --version to specify it explicitly."
+         Use --release-version to specify it explicitly."
     )
 }

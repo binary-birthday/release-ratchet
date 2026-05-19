@@ -37,9 +37,8 @@ ecosystems:
 #     bump: patch
 #     changelog: "Refactoring"
 
-# GPG signing
+# GPG sign release tags (creates annotated tags)
 sign_tags: false
-sign_commits: false
 "#;
 
 pub fn execute(repo_path: &Path, args: InitArgs) -> Result<()> {

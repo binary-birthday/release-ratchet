@@ -5,7 +5,7 @@ use super::types::{CommitFooter, CommitType, ConventionalCommit};
 
 static HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"^(?P<type>[a-zA-Z]+)(?:\((?P<scope>[a-zA-Z0-9_/.\-]+)\))?(?P<breaking>!)?:\s+(?P<desc>.+)$",
+        r"^(?P<type>[a-zA-Z]+)(?:\((?P<scope>[^\)]+)\))?(?P<breaking>!)?:\s+(?P<desc>.+)$",
     )
     .unwrap()
 });
@@ -230,5 +230,17 @@ mod tests {
         // Footer right after blank line, no body
         assert!(c.body.is_none() || c.body.as_deref() == Some("Refs #456"));
         // The important thing is it parses successfully
+    }
+
+    #[test]
+    fn scope_with_at_sign() {
+        let c = parse_commit(oid(), "fix(@org/pkg): resolve import", "Alice").unwrap();
+        assert_eq!(c.scope.as_deref(), Some("@org/pkg"));
+    }
+
+    #[test]
+    fn scope_with_spaces() {
+        let c = parse_commit(oid(), "feat(some module): add thing", "Alice").unwrap();
+        assert_eq!(c.scope.as_deref(), Some("some module"));
     }
 }

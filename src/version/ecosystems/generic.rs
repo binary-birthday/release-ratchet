@@ -8,7 +8,17 @@ use crate::error::RatchetError;
 
 pub struct GenericEcosystem {
     pub path: PathBuf,
-    pub pattern: String,
+    pub regex: Regex,
+}
+
+impl GenericEcosystem {
+    pub fn new(path: PathBuf, pattern: &str) -> Result<Self, RatchetError> {
+        let regex = Regex::new(pattern).map_err(|e| RatchetError::VersionFile {
+            path: path.display().to_string(),
+            reason: format!("invalid regex pattern: {e}"),
+        })?;
+        Ok(Self { path, regex })
+    }
 }
 
 impl Ecosystem for GenericEcosystem {
@@ -20,13 +30,9 @@ impl Ecosystem for GenericEcosystem {
                 reason: e.to_string(),
             }
         })?;
-        let re = Regex::new(&self.pattern).map_err(|e| RatchetError::VersionFile {
+        let caps = self.regex.captures(&contents).ok_or_else(|| RatchetError::VersionFile {
             path: self.path.display().to_string(),
-            reason: format!("invalid regex pattern: {e}"),
-        })?;
-        let caps = re.captures(&contents).ok_or_else(|| RatchetError::VersionFile {
-            path: self.path.display().to_string(),
-            reason: format!("pattern '{}' did not match", self.pattern),
+            reason: format!("pattern '{}' did not match", self.regex.as_str()),
         })?;
         let version_str = caps.get(1).ok_or_else(|| RatchetError::VersionFile {
             path: self.path.display().to_string(),
@@ -46,13 +52,9 @@ impl Ecosystem for GenericEcosystem {
                 reason: e.to_string(),
             }
         })?;
-        let re = Regex::new(&self.pattern).map_err(|e| RatchetError::VersionFile {
+        let caps = self.regex.captures(&contents).ok_or_else(|| RatchetError::VersionFile {
             path: self.path.display().to_string(),
-            reason: format!("invalid regex pattern: {e}"),
-        })?;
-        let caps = re.captures(&contents).ok_or_else(|| RatchetError::VersionFile {
-            path: self.path.display().to_string(),
-            reason: format!("pattern '{}' did not match", self.pattern),
+            reason: format!("pattern '{}' did not match", self.regex.as_str()),
         })?;
         let full_match = caps.get(0).unwrap();
         let version_match = caps.get(1).ok_or_else(|| RatchetError::VersionFile {
@@ -60,7 +62,6 @@ impl Ecosystem for GenericEcosystem {
             reason: "pattern must have a capture group for the version".to_string(),
         })?;
 
-        // Replace just the captured version within the full match
         let new_full = format!(
             "{}{}{}",
             &full_match.as_str()[..version_match.start() - full_match.start()],

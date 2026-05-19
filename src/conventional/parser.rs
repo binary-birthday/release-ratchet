@@ -23,7 +23,7 @@ pub fn parse_commit(oid: git2::Oid, message: &str, author: &str) -> Option<Conve
 
     let caps = HEADER_RE.captures(first_line)?;
 
-    let commit_type = CommitType::from_str(caps.name("type").unwrap().as_str());
+    let commit_type: CommitType = caps.name("type").unwrap().as_str().parse().unwrap();
     let scope = caps.name("scope").map(|m| m.as_str().to_string());
     let breaking = caps.name("breaking").is_some();
     let description = caps.name("desc").unwrap().as_str().trim().to_string();

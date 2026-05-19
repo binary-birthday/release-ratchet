@@ -36,8 +36,9 @@ pub fn execute(repo_path: &Path, config: &Config, args: StatusArgs) -> Result<()
         .ecosystems
         .first()
         .and_then(|eco| {
-            let eco_impl = bumper::create_ecosystem(eco);
-            eco_impl.read_version(repo_path).ok()
+            bumper::create_ecosystem(eco)
+                .ok()
+                .and_then(|e| e.read_version(repo_path).ok())
         });
 
     if args.json {

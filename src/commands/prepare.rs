@@ -104,7 +104,7 @@ fn execute_with_version(
         eprintln!("Files that would be modified:");
         eprintln!("  - {}", config.changelog_path.display());
         for eco in &config.ecosystems {
-            let eco_impl = bumper::create_ecosystem(eco);
+            let eco_impl = bumper::create_ecosystem(eco)?;
             for f in eco_impl.modified_files() {
                 eprintln!("  - {}", f.display());
             }

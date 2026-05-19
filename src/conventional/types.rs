@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::semver_bump::BumpLevel;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -16,9 +18,11 @@ pub enum CommitType {
     Custom(String),
 }
 
-impl CommitType {
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
+impl FromStr for CommitType {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.to_lowercase().as_str() {
             "feat" => Self::Feat,
             "fix" => Self::Fix,
             "docs" => Self::Docs,
@@ -31,9 +35,11 @@ impl CommitType {
             "chore" => Self::Chore,
             "revert" => Self::Revert,
             other => Self::Custom(other.to_string()),
-        }
+        })
     }
+}
 
+impl CommitType {
     pub fn as_str(&self) -> &str {
         match self {
             Self::Feat => "feat",
@@ -86,7 +92,6 @@ pub struct CommitFooter {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct ConventionalCommit {
     pub oid: git2::Oid,
     pub commit_type: CommitType,
@@ -95,7 +100,9 @@ pub struct ConventionalCommit {
     pub description: String,
     pub body: Option<String>,
     pub footers: Vec<CommitFooter>,
+    #[allow(dead_code)]
     pub raw_message: String,
+    #[allow(dead_code)]
     pub author: String,
 }
 

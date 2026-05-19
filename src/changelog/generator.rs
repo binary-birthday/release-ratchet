@@ -4,7 +4,7 @@ use chrono::Local;
 use semver::Version;
 
 use crate::config::Config;
-use crate::conventional::types::ConventionalCommit;
+use crate::conventional::types::{CommitType, ConventionalCommit};
 
 pub fn generate_section(
     version: &Version,
@@ -35,16 +35,7 @@ pub fn generate_section_with_date(
     }
 
     // Group commits by their changelog heading
-    // Use BTreeMap for deterministic ordering
     let mut groups: BTreeMap<String, Vec<&ConventionalCommit>> = BTreeMap::new();
-
-    // Define the display order for built-in headings
-    let heading_order = [
-        "Features",
-        "Bug Fixes",
-        "Performance",
-        "Reverts",
-    ];
 
     for commit in commits {
         if let Some(heading) = config.changelog_heading_for_type(&commit.commit_type) {
@@ -52,10 +43,20 @@ pub fn generate_section_with_date(
         }
     }
 
-    // Output in defined order first, then any custom headings alphabetically
-    for heading in &heading_order {
-        let heading_str = heading.to_string();
-        if let Some(entries) = groups.remove(&heading_str) {
+    // Output built-in headings in canonical order (derived from CommitType),
+    // then any remaining custom headings in alphabetical order.
+    let canonical_order: Vec<String> = [
+        CommitType::Feat,
+        CommitType::Fix,
+        CommitType::Perf,
+        CommitType::Revert,
+    ]
+    .iter()
+    .filter_map(|ct| ct.default_changelog_heading().map(String::from))
+    .collect();
+
+    for heading in &canonical_order {
+        if let Some(entries) = groups.remove(heading) {
             out.push_str(&format!("\n### {heading}\n\n"));
             for c in entries {
                 out.push_str(&format_entry(c));
@@ -63,7 +64,6 @@ pub fn generate_section_with_date(
         }
     }
 
-    // Remaining custom headings
     for (heading, entries) in &groups {
         out.push_str(&format!("\n### {heading}\n\n"));
         for c in entries {

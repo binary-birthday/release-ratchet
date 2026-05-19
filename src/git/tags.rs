@@ -16,8 +16,13 @@ pub fn find_latest_release_tag(
     let pattern = format!("{tag_prefix}*");
     let tag_names = repo.tag_names(Some(&pattern))?;
 
-    // Build set of commits reachable from HEAD to scope tags to current branch
-    let reachable = reachable_from_head(repo)?;
+    let head_oid = match repo.head() {
+        Ok(head) => match head.peel_to_commit() {
+            Ok(c) => Some(c.id()),
+            Err(_) => None,
+        },
+        Err(_) => None,
+    };
 
     let mut releases: Vec<ReleaseTag> = Vec::new();
 
@@ -58,10 +63,21 @@ pub fn find_latest_release_tag(
             Err(_) => continue,
         };
 
-        // Only consider tags reachable from HEAD (scopes to current branch)
-        if !reachable.contains(&oid) {
-            log::debug!("skipping tag not reachable from HEAD: {tag_name}");
-            continue;
+        // Only consider tags reachable from HEAD (scopes to current branch).
+        // Uses graph_descendant_of which is O(1) per tag via merge-base,
+        // instead of walking the full history.
+        if let Some(head) = head_oid {
+            match repo.graph_descendant_of(head, oid) {
+                Ok(true) => {}
+                Ok(false) => {
+                    // Also check if HEAD *is* the tagged commit
+                    if head != oid {
+                        log::debug!("skipping tag not reachable from HEAD: {tag_name}");
+                        continue;
+                    }
+                }
+                Err(_) => continue,
+            }
         }
 
         releases.push(ReleaseTag {
@@ -73,23 +89,6 @@ pub fn find_latest_release_tag(
 
     releases.sort_by(|a, b| b.version.cmp(&a.version));
     Ok(releases.into_iter().next())
-}
-
-/// Collect all commit OIDs reachable from HEAD.
-fn reachable_from_head(repo: &Repository) -> Result<std::collections::HashSet<git2::Oid>, RatchetError> {
-    let mut set = std::collections::HashSet::new();
-    if let Ok(head) = repo.head() {
-        if let Ok(commit) = head.peel_to_commit() {
-            let mut revwalk = repo.revwalk()?;
-            revwalk.push(commit.id())?;
-            for oid in revwalk {
-                if let Ok(oid) = oid {
-                    set.insert(oid);
-                }
-            }
-        }
-    }
-    Ok(set)
 }
 
 pub fn create_tag(

@@ -145,8 +145,17 @@ fn derive_maintenance_branch(tag: &str, tag_prefix: &str) -> String {
 
 fn cherry_pick(repo: &git2::Repository, oid: git2::Oid) -> Result<(), anyhow::Error> {
     let commit = repo.find_commit(oid)?;
-    // Verify the commit has a parent (needed for diff computation)
-    anyhow::ensure!(commit.parent_count() > 0, "cherry-pick target has no parent");
+
+    anyhow::ensure!(
+        commit.parent_count() > 0,
+        "cannot cherry-pick root commit {} (no parent to diff against)",
+        short_oid(oid),
+    );
+    anyhow::ensure!(
+        commit.parent_count() == 1,
+        "cannot cherry-pick merge commit {} — use the original non-merge commit instead",
+        short_oid(oid),
+    );
 
     // Compute the cherry-pick: apply the diff between parent and commit onto HEAD
     let head_commit = repo.head()?.peel_to_commit()?;
@@ -168,6 +177,11 @@ fn cherry_pick(repo: &git2::Repository, oid: git2::Oid) -> Result<(), anyhow::Er
     let message = commit.message().unwrap_or("cherry-picked commit");
 
     repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head_commit])?;
+
+    // Update working tree to match the new commit
+    repo.checkout_head(Some(
+        git2::build::CheckoutBuilder::new().force(),
+    ))?;
 
     Ok(())
 }

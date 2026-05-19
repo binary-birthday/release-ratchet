@@ -9,7 +9,7 @@ use crate::config::{Config, PackageConfig};
 use crate::error::ExitCode;
 use crate::git::{branch, commits, repo, tags};
 use crate::git::tags::TagFilter;
-use crate::semver_bump::{self, BumpLevel, apply_bump, compute_prerelease_version};
+use crate::semver_bump::{self, BumpLevel, apply_bump, base_version, compute_prerelease_version};
 use crate::version::bumper;
 use crate::commands::prepare::check_dirty_files;
 use super::{resolve_packages, path_prefixes_for_package};
@@ -27,6 +27,18 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs, package_fil
     // Override flags require --package in monorepo
     if package_filter.is_none() && (args.bump.is_some() || args.release_version.is_some() || args.prerelease.is_some()) {
         anyhow::bail!("--bump, --release-version, and --prerelease require --package in monorepo mode");
+    }
+
+    // Validate prerelease ID
+    if let Some(ref id) = args.prerelease {
+        if id.is_empty()
+            || id.starts_with('.')
+            || id.ends_with('.')
+            || id.contains("..")
+            || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+        {
+            anyhow::bail!("invalid pre-release identifier '{id}'");
+        }
     }
 
     let repository = repo::open(repo_path).context("failed to open repository")?;
@@ -75,6 +87,24 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs, package_fil
         };
 
         if bump == BumpLevel::None && args.prerelease.is_none() {
+            // Check for stable promotion from pre-release
+            let any_tag = tags::find_latest_tag(&repository, &pkg.tag_prefix, TagFilter::Any)?;
+            if let Some(ref tag) = any_tag {
+                if !tag.version.pre.is_empty() {
+                    let next = base_version(&tag.version);
+                    let section = generator::generate_section(&next, &collection.conventional, config, remote_url.as_deref());
+                    eprintln!("[{}] {} -> {} (stable promotion)", pkg.name, tag.version, next);
+                    releases.push(PackageRelease {
+                        package: pkg,
+                        last_version: tag.version.clone(),
+                        next_version: next,
+                        bump: BumpLevel::None,
+                        section,
+                        modified_files: Vec::new(),
+                    });
+                    continue;
+                }
+            }
             log::info!("no releasable commits for package '{}', skipping", pkg.name);
             continue;
         }
@@ -147,16 +177,52 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs, package_fil
     let existing: Vec<PathBuf> = files_to_modify.iter().filter(|f| repo_path.join(f).exists()).cloned().collect();
     check_dirty_files(&repository, &existing)?;
 
-    // Create release branch
+    // Create release branch with rollback on failure
     let branch_name = args.branch.as_deref().unwrap_or(&config.release_branch);
-    if !args.no_branch {
+    let original_head = if !args.no_branch {
+        let head = repository.head().context("failed to read HEAD")?;
+        let refname = head.name().map(String::from);
         branch::create_and_checkout(&repository, branch_name)
             .context(format!("failed to create branch '{branch_name}'"))?;
+        refname
+    } else {
+        None
+    };
+
+    let result = apply_monorepo_changes(
+        repo_path, config, &repository, &mut releases, &remote_url, branch_name, args.no_branch,
+    );
+
+    if let Err(ref e) = result {
+        if let Some(ref refname) = original_head {
+            log::warn!("prepare failed, restoring original branch: {e:#}");
+            if let Err(re) = restore_head(&repository, refname) {
+                log::error!("failed to restore original branch: {re}");
+            }
+        }
     }
 
-    // Apply changes for each package
+    if result.is_ok() && !config.hooks.post_prepare.is_empty() {
+        let release_tags: Vec<String> = releases.iter()
+            .map(|r| format!("{}{}", r.package.tag_prefix, r.next_version))
+            .collect();
+        crate::hooks::run_hooks(&config.hooks.post_prepare, repo_path, &release_tags.join(","));
+    }
+
+    result
+}
+
+fn apply_monorepo_changes(
+    repo_path: &Path,
+    config: &Config,
+    repository: &git2::Repository,
+    releases: &mut Vec<PackageRelease>,
+    remote_url: &Option<String>,
+    branch_name: &str,
+    no_branch: bool,
+) -> Result<()> {
     let mut all_modified = Vec::new();
-    for rel in &mut releases {
+    for rel in releases.iter_mut() {
         let changelog_path = repo_path.join(rel.package.resolved_changelog_path());
         let updated = writer::update_changelog(&changelog_path, &rel.section, remote_url.as_deref(), &rel.package.tag_prefix)
             .context(format!("failed to update changelog for '{}'", rel.package.name))?;
@@ -170,7 +236,6 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs, package_fil
         rel.modified_files = modified;
     }
 
-    // Stage and commit
     let mut index = repository.index()?;
     for f in &all_modified {
         if repo_path.join(f).exists() {
@@ -192,29 +257,16 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs, package_fil
     repository.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&head])?;
 
     eprintln!("Created release commit: {message}");
-    if !args.no_branch {
+    if !no_branch {
         eprintln!("Release branch '{}' is ready. Create a PR/MR to merge it into '{}'.", branch_name, config.main_branch);
     }
     eprintln!("After merging, run `release-ratchet release` to tag the release.");
+    Ok(())
+}
 
-    if !config.hooks.post_prepare.is_empty() {
-        let versions: Vec<String> = releases.iter().map(|r| format!("{}={}", r.package.name, r.next_version)).collect();
-        let mut hooks_env = std::collections::HashMap::new();
-        hooks_env.insert("RELEASE_PACKAGES", versions.join(","));
-        for cmd in &config.hooks.post_prepare {
-            log::info!("running hook: {cmd}");
-            let status = std::process::Command::new("sh")
-                .arg("-c").arg(cmd)
-                .current_dir(repo_path)
-                .envs(&hooks_env)
-                .status();
-            match status {
-                Ok(s) if s.success() => log::info!("hook succeeded: {cmd}"),
-                Ok(s) => eprintln!("warning: hook '{cmd}' exited with {s}"),
-                Err(e) => eprintln!("warning: failed to run hook '{cmd}': {e}"),
-            }
-        }
-    }
-
+fn restore_head(repo: &git2::Repository, refname: &str) -> Result<(), git2::Error> {
+    let obj = repo.revparse_single(refname)?;
+    repo.checkout_tree(&obj, Some(git2::build::CheckoutBuilder::new().force()))?;
+    repo.set_head(refname)?;
     Ok(())
 }

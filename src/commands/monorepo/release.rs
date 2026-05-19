@@ -90,15 +90,15 @@ fn detect_package_version(
     pkg: &crate::config::PackageConfig,
 ) -> Result<Version> {
     // Try commit message: "chore: release core-v1.2.3, cli-v0.5.0"
-    // Find the specific tag_prefix match in the message
-    let prefix_pattern = format!("{tag_prefix}");
-    if let Some(pos) = message.find(&prefix_pattern) {
-        let after = &message[pos + prefix_pattern.len()..];
-        let version_re = Regex::new(r"^(\d+\.\d+\.\d+(?:-[\w.\-]+)?)").unwrap();
-        if let Some(caps) = version_re.captures(after) {
-            let v = caps.get(1).unwrap().as_str();
-            return Version::parse(v).context(format!("invalid version in commit: {v}"));
-        }
+    // Use regex with word boundary to avoid prefix substring ambiguity
+    // (e.g., "core-v" matching inside "ui-core-v")
+    let prefix_re = Regex::new(&format!(
+        r"(?:^|[\s,]){}(\d+\.\d+\.\d+(?:-[\w.\-]+)?)",
+        regex::escape(tag_prefix)
+    )).unwrap();
+    if let Some(caps) = prefix_re.captures(message) {
+        let v = caps.get(1).unwrap().as_str();
+        return Version::parse(v).context(format!("invalid version in commit: {v}"));
     }
 
     // Fallback: read CHANGELOG.md from commit tree

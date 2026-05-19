@@ -27,7 +27,7 @@ pub fn execute(repo_path: &Path, config: &Config, args: ReleaseArgs, package_fil
         eprintln!("--- DRY RUN ---");
     }
 
-    let mut created = 0;
+    let mut created_tags: Vec<String> = Vec::new();
     for pkg in &packages {
         let version = if let Some(ref v) = args.release_version {
             if package_filter.is_none() {
@@ -54,11 +54,11 @@ pub fn execute(repo_path: &Path, config: &Config, args: ReleaseArgs, package_fil
         tags::create_tag(&repository, &tag_name, target_oid, config.sign_tags)
             .context(format!("failed to create tag '{tag_name}'"))?;
         eprintln!("Created tag '{tag_name}' at {short}");
-        created += 1;
+        created_tags.push(tag_name);
     }
 
     if !args.dry_run {
-        if created > 0 {
+        if !created_tags.is_empty() {
             eprintln!("Run `git push origin --tags` to publish.");
         }
 
@@ -74,7 +74,8 @@ pub fn execute(repo_path: &Path, config: &Config, args: ReleaseArgs, package_fil
         }
 
         if !config.hooks.post_release.is_empty() {
-            crate::hooks::run_hooks(&config.hooks.post_release, repo_path, "monorepo");
+            let versions = created_tags.join(",");
+            crate::hooks::run_hooks(&config.hooks.post_release, repo_path, &versions);
         }
     }
 
@@ -89,11 +90,6 @@ fn detect_package_version(
     pkg: &crate::config::PackageConfig,
 ) -> Result<Version> {
     // Try commit message: "chore: release core-v1.2.3, cli-v0.5.0"
-    let _re = Regex::new(&format!(
-        r"(?:{})?(\d+\.\d+\.\d+(?:-[\w.\-]+)?)",
-        regex::escape(tag_prefix)
-    )).unwrap();
-
     // Find the specific tag_prefix match in the message
     let prefix_pattern = format!("{tag_prefix}");
     if let Some(pos) = message.find(&prefix_pattern) {

@@ -9,8 +9,9 @@ use crate::config::{Config, PackageConfig};
 use crate::error::ExitCode;
 use crate::git::{branch, commits, repo, tags};
 use crate::git::tags::TagFilter;
-use crate::semver_bump::{self, BumpLevel, apply_bump};
+use crate::semver_bump::{self, BumpLevel, apply_bump, compute_prerelease_version};
 use crate::version::bumper;
+use crate::commands::prepare::check_dirty_files;
 use super::{resolve_packages, path_prefixes_for_package};
 
 struct PackageRelease<'a> {
@@ -73,12 +74,27 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs, package_fil
             semver_bump::determine_bump(&collection.conventional, config)
         };
 
-        if bump == BumpLevel::None {
+        if bump == BumpLevel::None && args.prerelease.is_none() {
             log::info!("no releasable commits for package '{}', skipping", pkg.name);
             continue;
         }
 
-        let next_version = apply_bump(&last_version, bump);
+        let next_version = if let Some(ref prerelease_id) = args.prerelease {
+            if bump == BumpLevel::None {
+                log::info!("no releasable commits for package '{}', skipping", pkg.name);
+                continue;
+            }
+            let tentative_base = apply_bump(&last_version, bump);
+            let latest_pre = tags::find_latest_tag(
+                &repository, &pkg.tag_prefix,
+                TagFilter::PrereleasesOf(tentative_base.clone()),
+            )?;
+            let pre_version = latest_pre.as_ref().map(|t| &t.version);
+            compute_prerelease_version(&last_version, pre_version, bump, prerelease_id)
+        } else {
+            apply_bump(&last_version, bump)
+        };
+
         let section = generator::generate_section(&next_version, &collection.conventional, config, remote_url.as_deref());
 
         releases.push(PackageRelease {
@@ -108,6 +124,16 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs, package_fil
         }
     }
 
+    // Collect all files that will be modified for dirty-check
+    let mut files_to_modify: Vec<PathBuf> = Vec::new();
+    for rel in &releases {
+        files_to_modify.push(rel.package.resolved_changelog_path());
+        for eco in &rel.package.ecosystems {
+            let eco_impl = bumper::create_ecosystem(eco)?;
+            files_to_modify.extend(eco_impl.modified_files());
+        }
+    }
+
     if args.dry_run {
         eprintln!("--- DRY RUN ---\n");
         for rel in &releases {
@@ -116,6 +142,10 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs, package_fil
         }
         return Ok(());
     }
+
+    // Check for dirty files
+    let existing: Vec<PathBuf> = files_to_modify.iter().filter(|f| repo_path.join(f).exists()).cloned().collect();
+    check_dirty_files(&repository, &existing)?;
 
     // Create release branch
     let branch_name = args.branch.as_deref().unwrap_or(&config.release_branch);

@@ -259,6 +259,25 @@ fn validate_paths(repo_root: &Path, config: &Config) -> Result<(), RatchetError>
         };
         validate_safe_path(repo_root, p, "ecosystem path")?;
     }
+    // Validate package paths
+    for pkg in &config.packages {
+        validate_relative_path(&pkg.path, &format!("package '{}' path", pkg.name))?;
+        if let Some(ref cl) = pkg.changelog_path {
+            validate_relative_path(cl, &format!("package '{}' changelog_path", pkg.name))?;
+        }
+        for eco in &pkg.ecosystems {
+            let p = match eco {
+                EcosystemConfig::Cargo { path } => path,
+                EcosystemConfig::Node { path } => path,
+                EcosystemConfig::Python { path } => path,
+                EcosystemConfig::Generic { path, .. } => path,
+            };
+            validate_safe_path(repo_root, p, &format!("package '{}' ecosystem path", pkg.name))?;
+        }
+    }
+    for shared in &config.shared_paths {
+        validate_relative_path(&shared.path, "shared_paths path")?;
+    }
     Ok(())
 }
 

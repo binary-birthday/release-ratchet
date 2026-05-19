@@ -72,6 +72,9 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Commands::Validate(args) => {
+            if cli.package.is_some() {
+                log::warn!("--package is ignored by validate (commit format is package-agnostic)");
+            }
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
             commands::validate::execute(&repo_path, &config, args)
         }
@@ -84,6 +87,9 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Commands::Backport(args) => {
+            if cli.package.is_some() {
+                log::warn!("--package is ignored by backport");
+            }
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
             commands::backport::execute(&repo_path, &config, args)
         }

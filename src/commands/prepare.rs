@@ -291,7 +291,7 @@ fn restore_head(repo: &git2::Repository, refname: &str) -> Result<(), git2::Erro
     Ok(())
 }
 
-fn check_dirty_files(
+pub(crate) fn check_dirty_files(
     repo: &git2::Repository,
     files: &[std::path::PathBuf],
 ) -> Result<()> {

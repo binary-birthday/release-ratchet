@@ -37,6 +37,10 @@ fn insert_section(existing: &str, new_section: &str) -> String {
     if let Some(pos) = existing.find("\n## [") {
         let (before, after) = existing.split_at(pos + 1); // +1 to keep the newline
         format!("{before}{new_section}\n{after}")
+    } else if existing.starts_with("## [") {
+        // Changelog starts directly with a version heading (no header/preamble).
+        // Insert the new section before it.
+        format!("{new_section}\n{existing}")
     } else {
         // No existing version sections; append after the header
         let trimmed = existing.trim_end();
@@ -105,5 +109,15 @@ mod tests {
         let pos_new = result.find("## [1.1.0]").unwrap();
         let pos_old = result.find("## [1.0.0]").unwrap();
         assert!(pos_new < pos_old);
+    }
+
+    #[test]
+    fn insert_before_existing_section_without_header() {
+        // Changelog that starts directly with a version heading (no "# Changelog" preamble).
+        let existing = "## [1.0.0] - 2025-01-01\n\n### Features\n\n- old thing\n";
+        let result = insert_section(existing, "## [1.1.0] - 2026-01-01\n\n### Features\n\n- new thing\n");
+        let pos_new = result.find("## [1.1.0]").unwrap();
+        let pos_old = result.find("## [1.0.0]").unwrap();
+        assert!(pos_new < pos_old, "new section should come before old section, got:\n{result}");
     }
 }

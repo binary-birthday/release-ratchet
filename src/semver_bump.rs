@@ -82,7 +82,9 @@ pub fn compute_prerelease_version(
     };
 
     let mut version = base;
-    version.pre = semver::Prerelease::new(&format!("{prerelease_id}.{number}")).unwrap();
+    // Safety: prerelease_id is validated by the caller before reaching here
+    let pre_str = format!("{prerelease_id}.{number}");
+    version.pre = semver::Prerelease::new(&pre_str).unwrap();
     version
 }
 

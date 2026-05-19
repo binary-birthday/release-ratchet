@@ -88,6 +88,13 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs) -> Result<(
         return Err(ExitCode::NothingToRelease.into());
     }
 
+    // Validate pre-release identifier early
+    if let Some(ref id) = args.prerelease {
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.') {
+            anyhow::bail!("invalid pre-release identifier '{id}': must be non-empty alphanumeric with hyphens/dots");
+        }
+    }
+
     // 4. Compute next version
     let next_version = if let Some(ref prerelease_id) = args.prerelease {
         if bump == BumpLevel::None {

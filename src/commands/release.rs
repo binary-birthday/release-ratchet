@@ -89,7 +89,7 @@ fn detect_version_from_commit(
 
     // Try to extract from "chore: release vX.Y.Z" or "chore: release X.Y.Z"
     let release_re = Regex::new(&format!(
-        r"chore:\s+release\s+(?:{})?(\d+\.\d+\.\d+(?:-[\w.]+)?)",
+        r"chore:\s+release\s+(?:{})?(\d+\.\d+\.\d+(?:-[\w.\-]+)?)",
         regex::escape(&config.tag_prefix)
     ))
     .unwrap();
@@ -140,7 +140,7 @@ fn detect_version_from_changelog(
         .context("CHANGELOG.md is not valid UTF-8")?;
 
     // Parse the first "## [X.Y.Z]" heading
-    let version_re = Regex::new(r"## \[(\d+\.\d+\.\d+(?:-[\w.]+)?)\]").unwrap();
+    let version_re = Regex::new(r"## \[(\d+\.\d+\.\d+(?:-[\w.\-]+)?)\]").unwrap();
     let caps = version_re.captures(content)
         .context("no version heading found in CHANGELOG.md")?;
     let version_str = caps.get(1).unwrap().as_str();

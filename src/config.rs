@@ -152,12 +152,18 @@ fn default_python_path() -> PathBuf {
 }
 
 pub fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Config, RatchetError> {
-    let path = match config_path {
-        Some(p) => p.to_path_buf(),
-        None => repo_root.join(".release-ratchet.yml"),
+    let (path, explicit) = match config_path {
+        Some(p) => (p.to_path_buf(), true),
+        None => (repo_root.join(".release-ratchet.yml"), false),
     };
 
     if !path.exists() {
+        if explicit {
+            return Err(RatchetError::Config(format!(
+                "config file not found: {}",
+                path.display()
+            )));
+        }
         log::info!("No config file found at {}, using defaults", path.display());
         return Ok(Config {
             ecosystems: detect_ecosystems(repo_root),

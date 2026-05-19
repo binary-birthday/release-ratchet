@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use regex::Regex;
 use semver::Version;
 
 use super::Ecosystem;
@@ -46,22 +45,37 @@ impl Ecosystem for NodeEcosystem {
             }
         })?;
 
-        // Use regex replacement to preserve original formatting (indentation, key order, etc.)
-        let re = Regex::new(r#"("version"\s*:\s*")([^"]+)(")"#).map_err(|e| {
+        // Parse to find the exact top-level "version" value, then do a targeted
+        // string replacement at that byte offset. This ensures we modify only the
+        // top-level field (not nested "version" keys) while preserving formatting.
+        let json: serde_json::Value = serde_json::from_str(&contents).map_err(|e| {
             RatchetError::VersionFile {
                 path: self.path.display().to_string(),
-                reason: format!("regex error: {e}"),
+                reason: format!("invalid JSON: {e}"),
+            }
+        })?;
+        let old_version = json["version"].as_str().ok_or_else(|| {
+            RatchetError::VersionFile {
+                path: self.path.display().to_string(),
+                reason: "missing \"version\" field".to_string(),
             }
         })?;
 
-        if !re.is_match(&contents) {
-            return Err(RatchetError::VersionFile {
+        // Find the top-level "version": "..." pattern by searching for the key
+        // followed by the exact old version string. We search for the literal
+        // old value to avoid matching nested occurrences.
+        let (pos, replace_len) = find_version_needle(&contents, old_version)
+            .ok_or_else(|| RatchetError::VersionFile {
                 path: self.path.display().to_string(),
-                reason: "could not find \"version\" field in JSON".to_string(),
-            });
-        }
+                reason: format!(
+                    "could not locate top-level \"version\": \"{old_version}\" in file"
+                ),
+            })?;
 
-        let result = re.replacen(&contents, 1, format!("${{1}}{version}${{3}}"));
+        let mut result = String::with_capacity(contents.len());
+        result.push_str(&contents[..pos]);
+        result.push_str(&version.to_string());
+        result.push_str(&contents[pos + replace_len..]);
 
         std::fs::write(&full_path, result.as_bytes()).map_err(|e| {
             RatchetError::VersionFile {
@@ -74,4 +88,22 @@ impl Ecosystem for NodeEcosystem {
     fn modified_files(&self) -> Vec<PathBuf> {
         vec![self.path.clone()]
     }
+}
+
+/// Find the byte offset and length of the version *value* in the first
+/// top-level `"version": "<value>"` occurrence that matches `old_version`.
+fn find_version_needle(contents: &str, old_version: &str) -> Option<(usize, usize)> {
+    // Try patterns: `"version": "X.Y.Z"`, `"version":"X.Y.Z"`, `"version" : "X.Y.Z"`
+    for pattern in [
+        format!("\"version\": \"{old_version}\""),
+        format!("\"version\":\"{old_version}\""),
+        format!("\"version\" : \"{old_version}\""),
+    ] {
+        if let Some(match_start) = contents.find(&pattern) {
+            // Find the version value within the matched pattern
+            let value_start = match_start + pattern.find(old_version).unwrap();
+            return Some((value_start, old_version.len()));
+        }
+    }
+    None
 }

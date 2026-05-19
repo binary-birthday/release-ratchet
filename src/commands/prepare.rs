@@ -98,19 +98,30 @@ fn execute_with_version(
     // 5. Generate changelog section
     let section = generator::generate_section(next_version, conventional_commits, config);
 
+    // Collect all files that will be modified (filter to files that exist on disk)
+    let mut files_to_modify = vec![config.changelog_path.clone()];
+    for eco in &config.ecosystems {
+        let eco_impl = bumper::create_ecosystem(eco)?;
+        files_to_modify.extend(eco_impl.modified_files());
+    }
+    let existing_files: Vec<_> = files_to_modify
+        .iter()
+        .filter(|f| repo_path.join(f).exists())
+        .cloned()
+        .collect();
+
     if args.dry_run {
         eprintln!("--- DRY RUN ---\n");
         println!("{section}");
         eprintln!("Files that would be modified:");
-        eprintln!("  - {}", config.changelog_path.display());
-        for eco in &config.ecosystems {
-            let eco_impl = bumper::create_ecosystem(eco)?;
-            for f in eco_impl.modified_files() {
-                eprintln!("  - {}", f.display());
-            }
+        for f in &files_to_modify {
+            eprintln!("  - {}", f.display());
         }
         return Ok(());
     }
+
+    // Check for uncommitted changes to files we're about to overwrite
+    check_dirty_files(repository, &existing_files)?;
 
     // 6. Create release branch FIRST (before modifying files), unless --no-branch.
     //    Save original ref so we can restore on failure.
@@ -173,11 +184,13 @@ fn apply_release_changes(
     let modified_files = bumper::bump_all(repo_path, &config.ecosystems, next_version)
         .context("failed to bump version files")?;
 
-    // 9. Stage and commit
+    // 9. Stage and commit (skip files that don't exist, e.g. Cargo.lock in lib crates)
     let mut index = repository.index()?;
     index.add_path(&config.changelog_path)?;
     for f in &modified_files {
-        index.add_path(f)?;
+        if repo_path.join(f).exists() {
+            index.add_path(f)?;
+        }
     }
     index.write()?;
 
@@ -210,5 +223,38 @@ fn restore_head(repo: &git2::Repository, refname: &str) -> Result<(), git2::Erro
     let obj = repo.revparse_single(refname)?;
     repo.checkout_tree(&obj, Some(git2::build::CheckoutBuilder::new().force()))?;
     repo.set_head(refname)?;
+    Ok(())
+}
+
+fn check_dirty_files(
+    repo: &git2::Repository,
+    files: &[std::path::PathBuf],
+) -> Result<()> {
+    let statuses = repo.statuses(None)?;
+    let mut dirty = Vec::new();
+
+    for entry in statuses.iter() {
+        let status = entry.status();
+        // Only flag files with unstaged working-tree modifications.
+        // Staged (index) changes are fine — they'll be included in the commit.
+        // New untracked files are fine — prepare creates new files (CHANGELOG.md).
+        if status.is_wt_modified() {
+            if let Some(path) = entry.path() {
+                let entry_path = std::path::Path::new(path);
+                if files.iter().any(|f| f == entry_path) {
+                    dirty.push(path.to_string());
+                }
+            }
+        }
+    }
+
+    if !dirty.is_empty() {
+        anyhow::bail!(
+            "refusing to overwrite uncommitted changes in: {}\n\
+             Commit or stash your changes first.",
+            dirty.join(", ")
+        );
+    }
+
     Ok(())
 }

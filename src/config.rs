@@ -161,7 +161,7 @@ pub fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Confi
 }
 
 fn validate_paths(repo_root: &Path, config: &Config) -> Result<(), RatchetError> {
-    validate_relative_path(&config.changelog_path, "changelog_path")?;
+    validate_safe_path(repo_root, &config.changelog_path, "changelog_path")?;
     for eco in &config.ecosystems {
         let p = match eco {
             EcosystemConfig::Cargo { path } => path,
@@ -169,17 +169,20 @@ fn validate_paths(repo_root: &Path, config: &Config) -> Result<(), RatchetError>
             EcosystemConfig::Python { path } => path,
             EcosystemConfig::Generic { path, .. } => path,
         };
-        validate_relative_path(p, "ecosystem path")?;
-        // Verify resolved path stays within repo root
-        let resolved = repo_root.join(p);
-        if let Ok(canonical) = resolved.canonicalize() {
-            if !canonical.starts_with(repo_root) {
-                return Err(RatchetError::Config(format!(
-                    "{} '{}' resolves outside the repository",
-                    "ecosystem path",
-                    p.display()
-                )));
-            }
+        validate_safe_path(repo_root, p, "ecosystem path")?;
+    }
+    Ok(())
+}
+
+fn validate_safe_path(repo_root: &Path, path: &Path, label: &str) -> Result<(), RatchetError> {
+    validate_relative_path(path, label)?;
+    let resolved = repo_root.join(path);
+    if let Ok(canonical) = resolved.canonicalize() {
+        if !canonical.starts_with(repo_root) {
+            return Err(RatchetError::Config(format!(
+                "{label} '{}' resolves outside the repository",
+                path.display()
+            )));
         }
     }
     Ok(())

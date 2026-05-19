@@ -45,8 +45,9 @@ fn commit(repo: &Repository, path: &Path, filename: &str, content: &str, message
     let file_path = path.join(filename);
     std::fs::write(&file_path, content).unwrap();
 
-    // Stage it
+    // Reload index from disk (in case a subprocess modified it)
     let mut index = repo.index().unwrap();
+    index.read(true).unwrap();
     index.add_path(Path::new(filename)).unwrap();
     index.write().unwrap();
 

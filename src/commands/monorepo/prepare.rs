@@ -122,7 +122,17 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs, package_fil
             let pre_version = latest_pre.as_ref().map(|t| &t.version);
             compute_prerelease_version(&last_version, pre_version, bump, prerelease_id)
         } else {
-            apply_bump(&last_version, bump)
+            // Check for stable promotion: if a pre-release exists, promote it
+            let any_tag = tags::find_latest_tag(&repository, &pkg.tag_prefix, TagFilter::Any)?;
+            if let Some(ref tag) = any_tag {
+                if !tag.version.pre.is_empty() {
+                    base_version(&tag.version)
+                } else {
+                    apply_bump(&last_version, bump)
+                }
+            } else {
+                apply_bump(&last_version, bump)
+            }
         };
 
         let section = generator::generate_section(&next_version, &collection.conventional, config, remote_url.as_deref());

@@ -1,7 +1,9 @@
 use std::path::Path;
 use std::process::Command;
 
-pub fn run_hooks(commands: &[String], repo_root: &Path, version: &str) {
+/// Run lifecycle hooks. Returns the number of failed hooks.
+pub fn run_hooks(commands: &[String], repo_root: &Path, version: &str) -> usize {
+    let mut failures = 0;
     for cmd in commands {
         log::info!("running hook: {cmd}");
         let result = Command::new("sh")
@@ -16,10 +18,13 @@ pub fn run_hooks(commands: &[String], repo_root: &Path, version: &str) {
             }
             Ok(status) => {
                 eprintln!("warning: hook '{cmd}' exited with {status}");
+                failures += 1;
             }
             Err(e) => {
                 eprintln!("warning: failed to run hook '{cmd}': {e}");
+                failures += 1;
             }
         }
     }
+    failures
 }

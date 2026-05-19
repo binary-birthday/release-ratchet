@@ -87,6 +87,7 @@ impl Default for Config {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct CommitTypeOverride {
     pub bump: BumpLevelConfig,
     #[serde(default)]
@@ -114,6 +115,7 @@ impl BumpLevelConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
 pub struct HooksConfig {
     #[serde(default)]
     pub post_prepare: Vec<String>,
@@ -122,6 +124,7 @@ pub struct HooksConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct PackageConfig {
     /// Unique name for this package.
     pub name: String,
@@ -160,6 +163,7 @@ impl PackageConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct SharedPathConfig {
     /// Path prefix (relative to repo root).
     pub path: PathBuf,
@@ -240,6 +244,16 @@ pub fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Confi
         "failed to parse {}: {e}",
         path.display()
     )))?;
+
+    // Validate commit_type_override keys are lowercase
+    for key in config.commit_type_overrides.keys() {
+        if key != &key.to_lowercase() {
+            return Err(RatchetError::Config(format!(
+                "commit_type_overrides key '{key}' must be lowercase (use '{}')",
+                key.to_lowercase()
+            )));
+        }
+    }
 
     if config.ecosystems.is_empty() {
         config.ecosystems = detect_ecosystems(repo_root);

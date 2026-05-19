@@ -42,16 +42,25 @@ fn run(cli: Cli) -> Result<()> {
 
     match cli.command {
         Commands::Init(args) => commands::init::execute(&repo_path, args),
-        _ => {
+        Commands::Prepare(args) => {
             let config = config::load_config(&repo_path, cli.config.as_deref())?;
-            match cli.command {
-                Commands::Prepare(args) => commands::prepare::execute(&repo_path, &config, args),
-                Commands::Release(args) => commands::release::execute(&repo_path, &config, args),
-                Commands::Status(args) => commands::status::execute(&repo_path, &config, args),
-                Commands::Validate(args) => commands::validate::execute(&repo_path, &config, args),
-                Commands::Backport(args) => commands::backport::execute(&repo_path, &config, args),
-                Commands::Init(_) => unreachable!(),
-            }
+            commands::prepare::execute(&repo_path, &config, args)
+        }
+        Commands::Release(args) => {
+            let config = config::load_config(&repo_path, cli.config.as_deref())?;
+            commands::release::execute(&repo_path, &config, args)
+        }
+        Commands::Status(args) => {
+            let config = config::load_config(&repo_path, cli.config.as_deref())?;
+            commands::status::execute(&repo_path, &config, args)
+        }
+        Commands::Validate(args) => {
+            let config = config::load_config(&repo_path, cli.config.as_deref())?;
+            commands::validate::execute(&repo_path, &config, args)
+        }
+        Commands::Backport(args) => {
+            let config = config::load_config(&repo_path, cli.config.as_deref())?;
+            commands::backport::execute(&repo_path, &config, args)
         }
     }
 }

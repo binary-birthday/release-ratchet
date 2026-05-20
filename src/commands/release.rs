@@ -45,12 +45,18 @@ pub fn execute(repo_path: &Path, config: &Config, args: ReleaseArgs) -> Result<(
         return Ok(());
     }
 
-    // 4. Create the tag
-    tags::create_tag(&repository, &tag_name, target_oid, config.sign_tags)
-        .context(format!("failed to create tag '{tag_name}'"))?;
-
-    eprintln!("Created tag '{tag_name}' at {short_oid}");
-    eprintln!("Run `git push origin {tag_name}` to publish.");
+    // 4. Create the tag (if it already exists, this release was already done)
+    match tags::create_tag(&repository, &tag_name, target_oid, config.sign_tags) {
+        Ok(()) => {
+            eprintln!("Created tag '{tag_name}' at {short_oid}");
+            eprintln!("Run `git push origin {tag_name}` to publish.");
+        }
+        Err(crate::error::RatchetError::TagAlreadyExists { .. }) => {
+            eprintln!("Tag '{tag_name}' already exists. Already released.");
+            return Ok(());
+        }
+        Err(e) => return Err(e).context(format!("failed to create tag '{tag_name}'")),
+    }
 
     // Branch cleanup (explicit dry-run guard for safety under refactoring)
     if !args.dry_run && (args.cleanup || config.cleanup_branch) {

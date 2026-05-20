@@ -389,13 +389,14 @@ fn release_dry_run() {
 }
 
 #[test]
-fn release_prevents_duplicate_tag() {
+fn release_duplicate_tag_succeeds_silently() {
     let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
     commit(&repo, dir.path(), "a.txt", "x", "feat: add feature");
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
-    let (_, _, stderr) = run_fail(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
-    assert!(stderr.contains("already exists"));
+    // Second release should succeed (already released, nothing to do)
+    let (_, stderr) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+    assert!(stderr.contains("already exists") || stderr.contains("Already released"));
 }
 
 #[test]

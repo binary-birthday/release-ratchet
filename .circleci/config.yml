@@ -28,11 +28,10 @@ jobs:
             git config user.email "ci@circleci.com"
       - run:
           name: Install release-ratchet
-          command: cargo build --release && cp target/release/release-ratchet /usr/local/bin/
+          command: cargo install --path .
       - run:
           name: Prepare and release
           command: |
-            # Exit cleanly if nothing to release (exit code 2)
             release-ratchet prepare --no-branch || {
               RC=$?
               if [ $RC -eq 2 ]; then

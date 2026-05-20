@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3] - 2026-05-20
+
+### Bug Fixes
+
+- **ci**: skip release when HEAD is already a release commit (prevents loop) [cb16549](https://github.com/binary-birthday/release-ratchet/commit/cb16549879221db16abb3a4afb83cffefbeac0bf)
+
 ## [0.3.2] - 2026-05-20
 
 ### Bug Fixes
@@ -67,6 +73,7 @@ All notable changes to this project will be documented in this file.
 - second review pass — robustness and correctness (1aa9ac9)
 - address review findings across codebase (0e2452a)
 
+[0.3.3]: https://github.com/binary-birthday/release-ratchet/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/binary-birthday/release-ratchet/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/binary-birthday/release-ratchet/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/binary-birthday/release-ratchet/compare/v0.2.0...v0.3.0

@@ -1223,3 +1223,377 @@ fn completions_zsh() {
     let output = binary().args(["completions", "zsh"]).output().unwrap();
     assert!(output.status.success());
 }
+
+// ============================================================================
+// Edge cases
+// ============================================================================
+
+#[test]
+fn edge_prepare_twice_blocked() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    // Second prepare should refuse
+    let (_, _, stderr) = run_fail(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    assert!(stderr.contains("already a release commit"));
+}
+
+#[test]
+fn edge_release_without_prepare() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    let (_, _, stderr) = run_fail(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+    assert!(stderr.contains("Could not detect version"));
+}
+
+#[test]
+fn edge_only_nonconventional_commits() {
+    let (dir, repo) = init_repo();
+    commit(&repo, dir.path(), "a.txt", "x", "WIP stuff");
+    commit(&repo, dir.path(), "b.txt", "y", "update things");
+    let output = binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]).output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
+fn edge_unicode_in_commits() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: add émoji support 🎉");
+    commit(&repo, dir.path(), "b.txt", "y", "fix(i18n): handle CJK characters 中文日本語");
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--dry-run"]));
+    assert!(stdout.contains("émoji support 🎉"));
+    assert!(stdout.contains("中文日本語"));
+}
+
+#[test]
+fn edge_empty_description_not_conventional() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    // "feat: " with trailing space and nothing else — no description
+    commit(&repo, dir.path(), "a.txt", "x", "feat: ");
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "status", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    // Should be treated as non-conventional or no-bump (chore: init is the only conventional)
+    assert_eq!(json["bump_level"], "none");
+}
+
+#[test]
+fn edge_multiple_breaking_footers() {
+    let (dir, repo) = init_repo();
+    write_config(dir.path(), MINIMAL_CONFIG);
+    commit(&repo, dir.path(), ".release-ratchet.toml",
+        &std::fs::read_to_string(dir.path().join(".release-ratchet.toml")).unwrap(),
+        "chore: config");
+    // Commit with both ! and BREAKING CHANGE footer
+    let msg = "refactor!: rewrite core\n\nBREAKING CHANGE: removed v1 API\nBREAKING-CHANGE: config format changed";
+    commit(&repo, dir.path(), "a.txt", "x", msg);
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "status", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["bump_level"], "major");
+    assert!(json["breaking_changes"].as_u64().unwrap() >= 1);
+}
+
+#[test]
+fn edge_long_body_with_footers() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    let msg = "feat(auth): add OAuth2 PKCE support\n\n\
+        This implements the full OAuth2 PKCE flow.\n\
+        It supports all major identity providers.\n\n\
+        Reviewed-by: Alice <alice@example.com>\n\
+        Refs #123\n\
+        BREAKING CHANGE: token endpoint changed";
+    commit(&repo, dir.path(), "a.txt", "x", msg);
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--dry-run"]));
+    assert!(stdout.contains("BREAKING CHANGES"));
+    assert!(stdout.contains("OAuth2 PKCE"));
+}
+
+#[test]
+fn edge_three_rapid_releases() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    let r = dir.path().to_str().unwrap();
+
+    commit(&repo, dir.path(), "a.txt", "1", "fix: one");
+    run_ok(binary().args(["--repo", r, "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", r, "release"]));
+
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    commit(&repo, dir.path(), "b.txt", "2", "fix: two");
+    run_ok(binary().args(["--repo", r, "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", r, "release"]));
+
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    commit(&repo, dir.path(), "c.txt", "3", "feat: three");
+    run_ok(binary().args(["--repo", r, "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", r, "release"]));
+
+    let repo = Repository::open(dir.path()).unwrap();
+    assert!(repo.refname_to_id("refs/tags/v0.0.1").is_ok());
+    assert!(repo.refname_to_id("refs/tags/v0.0.2").is_ok());
+    assert!(repo.refname_to_id("refs/tags/v0.1.0").is_ok());
+
+    let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+    let p1 = changelog.find("## [0.1.0]").unwrap();
+    let p2 = changelog.find("## [0.0.2]").unwrap();
+    let p3 = changelog.find("## [0.0.1]").unwrap();
+    assert!(p1 < p2 && p2 < p3, "changelog not in reverse order");
+}
+
+#[test]
+fn edge_empty_tag_prefix() {
+    let (dir, repo) = setup_with_config("tag_prefix = \"\"\nmain_branch = \"main\"\n");
+    commit(&repo, dir.path(), "a.txt", "x", "feat: thing");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+    let repo = Repository::open(dir.path()).unwrap();
+    assert!(repo.refname_to_id("refs/tags/0.1.0").is_ok());
+}
+
+#[test]
+fn edge_bump_release_version_conflict_on_prepare() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: thing");
+    let output = binary()
+        .args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch", "--bump", "major", "--release-version", "2.0.0"])
+        .output().unwrap();
+    assert!(!output.status.success());
+}
+
+#[test]
+fn edge_config_unknown_fields_rejected() {
+    let (dir, repo) = init_repo();
+    write_config(dir.path(), "tag_prefix = \"v\"\nbogus_field = true\n");
+    commit(&repo, dir.path(), ".release-ratchet.toml",
+        &std::fs::read_to_string(dir.path().join(".release-ratchet.toml")).unwrap(),
+        "chore: config");
+    let output = binary().args(["--repo", dir.path().to_str().unwrap(), "status"]).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.to_lowercase().contains("unknown"));
+}
+
+#[test]
+fn edge_config_uppercase_override_rejected() {
+    let (dir, repo) = init_repo();
+    write_config(dir.path(), "tag_prefix = \"v\"\n\n[commit_type_overrides.Refactor]\nbump = \"patch\"\n");
+    commit(&repo, dir.path(), ".release-ratchet.toml",
+        &std::fs::read_to_string(dir.path().join(".release-ratchet.toml")).unwrap(),
+        "chore: config");
+    let output = binary().args(["--repo", dir.path().to_str().unwrap(), "status"]).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("lowercase"));
+}
+
+#[test]
+fn edge_explicit_config_missing_errors() {
+    let (dir, _) = init_repo();
+    let output = binary()
+        .args(["--repo", dir.path().to_str().unwrap(), "--config", "/nonexistent/config.toml", "status"])
+        .output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not found"));
+}
+
+#[test]
+fn edge_failing_hook_warns_not_fails() {
+    let (dir, repo) = init_repo();
+    write_config(dir.path(), "tag_prefix = \"v\"\n\n[hooks]\npost_prepare = [\"exit 1\"]\n");
+    commit(&repo, dir.path(), ".release-ratchet.toml",
+        &std::fs::read_to_string(dir.path().join(".release-ratchet.toml")).unwrap(),
+        "chore: config");
+    commit(&repo, dir.path(), "a.txt", "x", "feat: thing");
+    let (_, stderr) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    assert!(stderr.contains("warning"));
+}
+
+#[test]
+fn edge_hooks_skipped_on_dry_run() {
+    let (dir, repo) = init_repo();
+    write_config(dir.path(), "tag_prefix = \"v\"\n\n[hooks]\npost_prepare = [\"echo SHOULD_NOT_SEE\"]\n");
+    commit(&repo, dir.path(), ".release-ratchet.toml",
+        &std::fs::read_to_string(dir.path().join(".release-ratchet.toml")).unwrap(),
+        "chore: config");
+    commit(&repo, dir.path(), "a.txt", "x", "feat: thing");
+    let output = binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--dry-run"]).output().unwrap();
+    let all_output = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(!all_output.contains("SHOULD_NOT_SEE"));
+}
+
+#[test]
+fn edge_bump_no_commit_created() {
+    let (dir, repo) = init_repo();
+    write_cargo_toml(dir.path(), "0.0.0");
+    write_config(dir.path(), CARGO_CONFIG);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.toml"]);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: thing");
+    let before = repo.head().unwrap().peel_to_commit().unwrap().id();
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "bump"]));
+    // Reload to see if HEAD changed
+    let repo = Repository::open(dir.path()).unwrap();
+    let after = repo.head().unwrap().peel_to_commit().unwrap().id();
+    assert_eq!(before, after, "bump should not create a commit");
+    let cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+    assert!(cargo.contains("version = \"0.1.0\""), "but should modify files");
+}
+
+#[test]
+fn edge_validate_no_space_after_colon() {
+    let (dir, _) = init_repo();
+    let output = binary()
+        .args(["--repo", dir.path().to_str().unwrap(), "validate", "--message", "feat:no space"])
+        .output().unwrap();
+    assert_eq!(output.status.code(), Some(3));
+}
+
+#[test]
+fn edge_validate_empty_message() {
+    let (dir, _) = init_repo();
+    let output = binary()
+        .args(["--repo", dir.path().to_str().unwrap(), "validate", "--message", ""])
+        .output().unwrap();
+    assert_eq!(output.status.code(), Some(3));
+}
+
+#[test]
+fn edge_status_json_schema_complete() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat!: breaking");
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "status", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    // All fields present
+    for field in ["last_tag", "last_version", "current_file_version", "commits_since",
+                  "conventional_commits", "non_conventional_commits", "bump_level",
+                  "next_version", "breaking_changes"] {
+        assert!(json.get(field).is_some(), "missing field: {field}");
+    }
+}
+
+#[test]
+fn edge_manual_tag_recognized_as_baseline() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: v1");
+    // Manually create a tag (not via release-ratchet)
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.tag_lightweight("v0.1.0", head.as_object(), false).unwrap();
+    // New commit after the tag
+    commit(&repo, dir.path(), "b.txt", "y", "fix: v1 fix");
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "status", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["last_version"], "0.1.0");
+    assert_eq!(json["next_version"], "0.1.1");
+    assert_eq!(json["conventional_commits"], 1); // only the fix since the tag
+}
+
+#[test]
+fn edge_notes_no_changelog_file() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: thing");
+    // notes --latest when no CHANGELOG.md exists
+    let output = binary().args(["--repo", dir.path().to_str().unwrap(), "notes", "--latest"]).output().unwrap();
+    assert!(!output.status.success());
+    // notes (generate) should still work — doesn't need existing file
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "notes"]));
+    assert!(stdout.contains("## [0.1.0]"));
+}
+
+#[test]
+fn edge_check_no_ecosystems_passes() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: thing");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+    // Check with no ecosystem files — should still pass (changelog + tag match)
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "check"]));
+}
+
+#[test]
+fn edge_backport_dry_run_no_branch() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    commit(&repo, dir.path(), "b.txt", "y", "fix: hotfix");
+    let fix_oid = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+    let (_, stderr) = run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(),
+        "backport", &fix_oid, "--onto", "v0.1.0", "--dry-run",
+    ]));
+    assert!(stderr.contains("DRY RUN"));
+    assert!(repo.find_branch("maintain/v0.1.x", git2::BranchType::Local).is_err(),
+        "branch should not be created in dry-run");
+}
+
+#[test]
+fn edge_post_release_hook_runs() {
+    let (dir, repo) = init_repo();
+    write_config(dir.path(), "tag_prefix = \"v\"\n\n[hooks]\npost_release = [\"echo RELEASED\"]\n");
+    commit(&repo, dir.path(), ".release-ratchet.toml",
+        &std::fs::read_to_string(dir.path().join(".release-ratchet.toml")).unwrap(),
+        "chore: config");
+    commit(&repo, dir.path(), "a.txt", "x", "feat: thing");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    let output = binary().args(["--repo", dir.path().to_str().unwrap(), "release"]).output().unwrap();
+    assert!(output.status.success());
+    let all = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(all.contains("RELEASED"), "hook output not found: {all}");
+}
+
+#[test]
+fn edge_release_cleanup_flag() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare"]));
+    // Should be on release branch
+    assert_eq!(repo.head().unwrap().shorthand().unwrap(), "release-ratchet--release");
+    // Switch to main for release
+    {
+        let release_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        let release_oid = release_commit.id();
+        let mut main_ref = repo.find_reference("refs/heads/main").unwrap();
+        main_ref.set_target(release_oid, "ff merge").unwrap();
+        let obj = repo.find_object(release_oid, None).unwrap();
+        repo.checkout_tree(&obj, Some(git2::build::CheckoutBuilder::new().force())).unwrap();
+        repo.set_head("refs/heads/main").unwrap();
+    }
+    let (_, stderr) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release", "--cleanup"]));
+    assert!(stderr.contains("Deleted branch"));
+}
+
+#[test]
+fn edge_commit_type_override_works() {
+    let (dir, repo) = init_repo();
+    // Make refactor trigger a patch bump
+    write_config(dir.path(), "tag_prefix = \"v\"\n\n[commit_type_overrides.refactor]\nbump = \"patch\"\nchangelog = \"Refactoring\"\n");
+    commit(&repo, dir.path(), ".release-ratchet.toml",
+        &std::fs::read_to_string(dir.path().join(".release-ratchet.toml")).unwrap(),
+        "chore: config");
+    commit(&repo, dir.path(), "a.txt", "x", "refactor: clean up code");
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "status", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["bump_level"], "patch", "refactor should be patch via override");
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--dry-run"]));
+    assert!(stdout.contains("### Refactoring"), "custom heading should appear");
+}
+
+#[test]
+fn edge_check_json_schema() {
+    let (dir, repo) = init_repo();
+    write_cargo_toml(dir.path(), "0.0.0");
+    write_config(dir.path(), CARGO_CONFIG);
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml", ".release-ratchet.toml"]);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: thing");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "check", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["consistent"], true);
+    assert!(json.get("tag_version").is_some());
+    assert!(json.get("file_versions").is_some());
+    assert!(json.get("errors").is_some());
+    assert!(json.get("changelog_has_section").is_some());
+}

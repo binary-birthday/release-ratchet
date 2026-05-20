@@ -32,6 +32,14 @@ jobs:
       - run:
           name: Prepare and release
           command: |
+            # Skip if HEAD is already a release commit (prevents loop
+            # when CI's own push triggers another run)
+            HEAD_MSG=$(git log -1 --format=%s)
+            if echo "$HEAD_MSG" | grep -q "^chore: release "; then
+              echo "HEAD is already a release commit. Skipping."
+              exit 0
+            fi
+
             release-ratchet prepare --no-branch || {
               RC=$?
               if [ $RC -eq 2 ]; then

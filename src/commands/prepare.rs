@@ -15,6 +15,20 @@ use crate::version::bumper;
 pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs) -> Result<()> {
     let repository = repo::open(repo_path).context("failed to open repository")?;
 
+    // Check if HEAD is already a release commit (prevent duplicate prepare)
+    if let Ok(head) = repository.head() {
+        if let Ok(commit) = head.peel_to_commit() {
+            let msg = commit.message().unwrap_or("");
+            if msg.starts_with("chore: release ") {
+                anyhow::bail!(
+                    "HEAD is already a release commit ({}).\n\
+                     Run `release-ratchet release` to tag it, or make new commits first.",
+                    msg.trim()
+                );
+            }
+        }
+    }
+
     // 1. Find latest release tag
     let latest = tags::find_latest_release_tag(&repository, &config.tag_prefix)
         .context("failed to search for release tags")?;

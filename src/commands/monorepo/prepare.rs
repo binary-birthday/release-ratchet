@@ -24,6 +24,22 @@ struct PackageRelease<'a> {
 }
 
 pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs, package_filter: Option<&str>) -> Result<()> {
+    // Check if HEAD is already a release commit
+    let repository_check = repo::open(repo_path).context("failed to open repository")?;
+    if let Ok(head) = repository_check.head() {
+        if let Ok(commit) = head.peel_to_commit() {
+            let msg = commit.message().unwrap_or("");
+            if msg.starts_with("chore: release ") {
+                anyhow::bail!(
+                    "HEAD is already a release commit ({}).\n\
+                     Run `release-ratchet release` to tag it, or make new commits first.",
+                    msg.trim()
+                );
+            }
+        }
+    }
+    drop(repository_check);
+
     // Override flags require --package in monorepo
     if package_filter.is_none() && (args.bump.is_some() || args.release_version.is_some() || args.prerelease.is_some()) {
         anyhow::bail!("--bump, --release-version, and --prerelease require --package in monorepo mode");

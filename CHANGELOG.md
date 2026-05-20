@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.4] - 2026-05-20
+
+### Bug Fixes
+
+- **ci**: two-phase pipeline — prepare creates PR, release runs after merge [02e711e](https://github.com/binary-birthday/release-ratchet/commit/02e711e7c3970533f8447f52f11c0e2ba51fac56)
+
 ## [0.3.3] - 2026-05-20
 
 ### Bug Fixes
@@ -73,6 +79,7 @@ All notable changes to this project will be documented in this file.
 - second review pass — robustness and correctness (1aa9ac9)
 - address review findings across codebase (0e2452a)
 
+[0.3.4]: https://github.com/binary-birthday/release-ratchet/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/binary-birthday/release-ratchet/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/binary-birthday/release-ratchet/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/binary-birthday/release-ratchet/compare/v0.3.0...v0.3.1

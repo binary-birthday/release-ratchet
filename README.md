@@ -423,6 +423,8 @@ definitions:
 
 ### CircleCI
 
+This config fully automates the release cycle: every push to main runs release-ratchet, and if there are releasable commits, it prepares, tags, pushes, and publishes a GitHub Release with the binary.
+
 ```yaml
 # .circleci/config.yml
 version: 2.1
@@ -446,7 +448,7 @@ jobs:
     steps:
       - add_ssh_keys:
           fingerprints:
-            - "your:deploy:key:fingerprint"
+            - "${DEPLOY_KEY_FINGERPRINT}"
       - checkout
       - run:
           name: Configure git
@@ -454,33 +456,113 @@ jobs:
             git config user.name "CircleCI"
             git config user.email "ci@circleci.com"
       - run:
-          name: Release
+          name: Install release-ratchet
           command: |
             curl -fsSL https://raw.githubusercontent.com/binary-birthday/release-ratchet/main/install.sh | sh
-            release-ratchet prepare --no-branch || exit 0
+      - run:
+          name: Prepare and release
+          command: |
+            release-ratchet prepare --no-branch || {
+              RC=$?
+              if [ $RC -eq 2 ]; then echo "Nothing to release."; exit 0; fi
+              exit $RC
+            }
             release-ratchet release
-            git push origin HEAD:main --tags
+            git push origin main --tags
+
+  build-and-publish:
+    docker:
+      - image: cimg/rust:1.86
+    steps:
+      - checkout
+      - run:
+          name: Build release binary
+          command: |
+            cargo build --release
+            mkdir -p artifacts
+            cp target/release/release-ratchet artifacts/release-ratchet-x86_64-unknown-linux-gnu
+      - persist_to_workspace:
+          root: artifacts
+          paths: ["*"]
+
+  publish-github-release:
+    docker:
+      - image: cibuilds/github:0.13
+    steps:
+      - attach_workspace:
+          at: artifacts
+      - run:
+          name: Publish to GitHub Releases
+          command: |
+            ghr -t "${GITHUB_TOKEN}" \
+              -u "${CIRCLE_PROJECT_USERNAME}" \
+              -r "${CIRCLE_PROJECT_REPONAME}" \
+              -c "${CIRCLE_SHA1}" \
+              -replace "${CIRCLE_TAG}" artifacts/
 
 workflows:
-  build-and-release:
+  # Test on every push
+  test:
     jobs:
-      - test
-      - release:
-          requires:
-            - test
+      - test:
+          filters:
+            tags:
+              only: /.*/
+
+  # On main: test → release-ratchet prepare+tag+push
+  auto-release:
+    jobs:
+      - test:
           filters:
             branches:
               only: main
+      - release:
+          requires: [test]
+          filters:
+            branches:
+              only: main
+
+  # On tag: build binary → GitHub Release
+  publish:
+    jobs:
+      - build-and-publish:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/
+      - publish-github-release:
+          requires: [build-and-publish]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/
 ```
 
-**Setup:** CircleCI's default deploy key is **read-only**. To push commits and tags:
+**Setup (one-time):**
 
-1. Go to **Project Settings → SSH Keys**
-2. Under **Additional SSH Keys**, click **Add SSH Key**
-3. Add a key with write access to your repo ([GitHub instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account))
-4. Copy the fingerprint into the `add_ssh_keys` step above
+1. **Write-access deploy key** (so CI can push commits and tags):
+   - Generate a key pair: `ssh-keygen -t ed25519 -C "circleci-deploy" -f /tmp/deploy_key`
+   - Add the **public** key to your repo: GitHub → **Settings → Deploy keys → Add** (check "Allow write access")
+   - Add the **private** key to CircleCI: **Project Settings → SSH Keys → Additional SSH Keys → Add SSH Key**
+   - Copy the fingerprint and add it as a `DEPLOY_KEY_FINGERPRINT` environment variable in **Project Settings → Environment Variables**
 
-For creating GitHub Releases, also add a `GITHUB_TOKEN` in **Project Settings → Environment Variables**.
+2. **GitHub token** (so `ghr` can create GitHub Releases):
+   - Go to [github.com/settings/tokens](https://github.com/settings/tokens) → **Generate new token (classic)** → scope: **repo**
+   - Add as `GITHUB_TOKEN` in **Project Settings → Environment Variables**
+
+**How it works:**
+
+```
+Push to main → test → release-ratchet prepare + release + push tag
+                                                          ↓
+                                            Tag triggers publish workflow
+                                                          ↓
+                                            Build binary → GitHub Release
+```
+
+If there are no releasable commits (only `chore:`, `docs:`, `test:`, etc.), the release job exits cleanly and no tag is created.
 
 ### Piping release notes to your forge
 

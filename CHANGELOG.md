@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-05-20
+
+### Bug Fixes
+
+- **ci**: use cargo install --path . to install to ~/.cargo/bin [58c99f8](https://github.com/binary-birthday/release-ratchet/commit/58c99f84f2d5ef9a1f66c3943fb43f38108fb005)
+
 ## [0.3.1] - 2026-05-20
 
 ### Bug Fixes
@@ -61,6 +67,7 @@ All notable changes to this project will be documented in this file.
 - second review pass — robustness and correctness (1aa9ac9)
 - address review findings across codebase (0e2452a)
 
+[0.3.2]: https://github.com/binary-birthday/release-ratchet/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/binary-birthday/release-ratchet/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/binary-birthday/release-ratchet/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/binary-birthday/release-ratchet/compare/v0.1.1...v0.2.0

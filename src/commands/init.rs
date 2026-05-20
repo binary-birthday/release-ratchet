@@ -13,7 +13,7 @@ tag_prefix = "v"
 main_branch = "main"
 
 # The branch name created during `prepare`
-release_branch = "release-ratchet--release"
+release_branch = "chore/next-release"
 
 # Path to the changelog file
 changelog_path = "CHANGELOG.md"

@@ -200,7 +200,7 @@ fn default_main_branch() -> String {
     "main".to_string()
 }
 fn default_release_branch() -> String {
-    "release-ratchet--release".to_string()
+    "chore/next-release".to_string()
 }
 fn default_changelog_path() -> PathBuf {
     PathBuf::from("CHANGELOG.md")

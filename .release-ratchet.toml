@@ -2,7 +2,7 @@
 
 tag_prefix = "v"
 main_branch = "main"
-release_branch = "release-ratchet--release"
+release_branch = "chore/next-release"
 changelog_path = "CHANGELOG.md"
 sign_tags = false
 

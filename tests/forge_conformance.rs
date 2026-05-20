@@ -304,7 +304,7 @@ fn gitlab_merge_commit_version_detection() {
         let parent = head.parent(0).unwrap();
         let new_oid = repo.commit(
             None, &sig, &sig,
-            "Merge branch 'release-ratchet--release' into 'main'",
+            "Merge branch 'chore/next-release' into 'main'",
             &tree, &[&parent],
         ).unwrap();
         let mut main_ref = repo.find_reference("refs/heads/main").unwrap();
@@ -359,7 +359,7 @@ fn bitbucket_squash_merge_version_detection() {
         let parent = head.parent(0).unwrap();
         let new_oid = repo.commit(
             None, &sig, &sig,
-            "Merged in release-ratchet--release (pull request #42)",
+            "Merged in chore/next-release (pull request #42)",
             &tree, &[&parent],
         ).unwrap();
         let mut main_ref = repo.find_reference("refs/heads/main").unwrap();

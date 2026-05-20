@@ -13,47 +13,96 @@ jobs:
           flags: --all-targets
       - rust/test
 
-  build-and-publish:
+  prepare-or-release:
     docker:
       - image: cimg/rust:1.86
     steps:
+      - add_ssh_keys:
+          fingerprints:
+            - "${DEPLOY_KEY_FINGERPRINT}"
       - checkout
       - run:
-          name: Build release binary
+          name: Configure git
           command: |
-            cargo build --release
-            mkdir -p artifacts
-            cp target/release/release-ratchet artifacts/release-ratchet-x86_64-unknown-linux-gnu
+            git config user.name "CircleCI"
+            git config user.email "ci@circleci.com"
       - run:
-          name: Install ghr
+          name: Install release-ratchet
           command: |
-            GHR_VERSION=0.16.2
-            curl -fsSL "https://github.com/tcnksm/ghr/releases/download/v${GHR_VERSION}/ghr_v${GHR_VERSION}_linux_amd64.tar.gz" | tar xz
-            sudo cp ghr_v${GHR_VERSION}_linux_amd64/ghr /usr/local/bin/
+            curl -fsSL https://raw.githubusercontent.com/binary-birthday/release-ratchet/main/install.sh | sh
       - run:
-          name: Publish to GitHub Releases
+          name: Release or prepare
           command: |
-            ghr -t "${GITHUB_TOKEN}" \
-              -u "${CIRCLE_PROJECT_USERNAME}" \
-              -r "${CIRCLE_PROJECT_REPONAME}" \
-              -c "${CIRCLE_SHA1}" \
-              -replace \
-              "${CIRCLE_TAG}" \
-              artifacts/
+            # Step 1: Try to release.
+            # If HEAD is a merged release PR, release-ratchet detects the
+            # version (from commit message, parent commits, or CHANGELOG)
+            # and creates a tag.
+            if release-ratchet release 2>&1; then
+              echo "Release succeeded. Pushing tag and publishing."
+              git push origin --tags
+
+              # Build binary for GitHub Releases
+              cargo build --release
+              mkdir -p /tmp/artifacts
+              cp target/release/release-ratchet /tmp/artifacts/release-ratchet-x86_64-unknown-linux-gnu
+
+              # Install and run ghr
+              GHR_VERSION=0.16.2
+              curl -fsSL "https://github.com/tcnksm/ghr/releases/download/v${GHR_VERSION}/ghr_v${GHR_VERSION}_linux_amd64.tar.gz" | tar xz
+              TAG=$(git describe --tags --abbrev=0)
+              ./ghr_v${GHR_VERSION}_linux_amd64/ghr \
+                -t "${GITHUB_TOKEN}" \
+                -u "${CIRCLE_PROJECT_USERNAME}" \
+                -r "${CIRCLE_PROJECT_REPONAME}" \
+                -replace \
+                "${TAG}" \
+                /tmp/artifacts/
+
+              echo "Published ${TAG} to GitHub Releases."
+
+              # Clean up the release branch
+              git push origin --delete chore/next-release 2>/dev/null || true
+
+              exit 0
+            fi
+
+            echo "Not a release merge. Trying prepare..."
+
+            # Step 2: Try to prepare.
+            # If there are releasable commits, creates a release branch.
+            release-ratchet prepare || {
+              RC=$?
+              if [ $RC -eq 2 ]; then
+                echo "Nothing to release."
+                exit 0
+              fi
+              # Exit 1 = HEAD is already a release commit or other error
+              echo "Prepare failed (exit $RC). Skipping."
+              exit 0
+            }
+
+            # Push the release branch for PR review
+            git push origin chore/next-release -f
+            echo "Release branch pushed. Open a PR to review."
 
 workflows:
+  # All non-main branches: test only
   test:
     jobs:
       - test:
           filters:
-            tags:
-              only: /.*/
+            branches:
+              ignore: main
 
-  release:
+  # Main: test → prepare or release
+  main:
     jobs:
-      - build-and-publish:
+      - test:
           filters:
             branches:
-              ignore: /.*/
-            tags:
-              only: /^v.*/
+              only: main
+      - prepare-or-release:
+          requires: [test]
+          filters:
+            branches:
+              only: main

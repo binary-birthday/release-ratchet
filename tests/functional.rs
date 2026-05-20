@@ -279,7 +279,7 @@ fn prepare_creates_branch_and_changelog() {
     let (_, stderr) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare"]));
     assert!(stderr.contains("0.0.0 -> 0.1.0"));
     assert!(stderr.contains("Created release commit"));
-    assert_eq!(repo.head().unwrap().shorthand().unwrap(), "release-ratchet--release");
+    assert_eq!(repo.head().unwrap().shorthand().unwrap(), "chore/next-release");
     let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
     assert!(changelog.contains("## [0.1.0]"));
     assert!(changelog.contains("add main feature"));
@@ -293,7 +293,7 @@ fn prepare_no_branch_stays_on_current() {
     let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
     commit(&repo, dir.path(), "a.txt", "x", "feat: new thing");
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
-    assert_ne!(repo.head().unwrap().shorthand().unwrap(), "release-ratchet--release");
+    assert_ne!(repo.head().unwrap().shorthand().unwrap(), "chore/next-release");
 }
 
 #[test]
@@ -487,7 +487,7 @@ fn full_branch_prepare_merge_release() {
         index.write().unwrap();
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "Merge branch 'release-ratchet--release'",
+        repo.commit(Some("HEAD"), &sig, &sig, "Merge branch 'chore/next-release'",
             &tree, &[&main_commit, &release_commit]).unwrap();
     }
     let (_, stderr) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
@@ -1549,7 +1549,7 @@ fn edge_release_cleanup_flag() {
     commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
     run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare"]));
     // Should be on release branch
-    assert_eq!(repo.head().unwrap().shorthand().unwrap(), "release-ratchet--release");
+    assert_eq!(repo.head().unwrap().shorthand().unwrap(), "chore/next-release");
     // Switch to main for release
     {
         let release_commit = repo.head().unwrap().peel_to_commit().unwrap();

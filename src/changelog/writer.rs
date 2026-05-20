@@ -32,10 +32,14 @@ pub fn write_changelog(path: &Path, contents: &str) -> Result<(), RatchetError> 
 }
 
 fn insert_section(existing: &str, new_section: &str) -> String {
+    // Normalize CRLF to LF for consistent matching
+    let normalized = existing.replace("\r\n", "\n");
+    let existing = &normalized;
+
     // Find the first "## [" which marks the start of an existing version section.
     // Insert the new section before it.
     if let Some(pos) = existing.find("\n## [") {
-        let (before, after) = existing.split_at(pos + 1); // +1 to keep the newline
+        let (before, after) = existing.split_at(pos + 1);
         format!("{before}{new_section}\n{after}")
     } else if existing.starts_with("## [") {
         // Changelog starts directly with a version heading (no header/preamble).

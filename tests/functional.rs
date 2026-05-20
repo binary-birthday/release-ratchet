@@ -1581,6 +1581,149 @@ fn edge_commit_type_override_works() {
 }
 
 #[test]
+fn edge_shallow_clone_status() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+    drop(repo);
+    // Shallow clone
+    let shallow_dir = tempfile::TempDir::new().unwrap();
+    std::process::Command::new("git")
+        .args(["clone", "--depth", "1", &format!("file://{}", dir.path().display()), shallow_dir.path().to_str().unwrap()])
+        .output().unwrap();
+    // Status should not crash
+    let output = binary().args(["--repo", shallow_dir.path().to_str().unwrap(), "status"]).output().unwrap();
+    assert!(output.status.success(), "status failed on shallow clone: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn edge_crlf_changelog() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    // Write CRLF changelog
+    std::fs::write(dir.path().join("CHANGELOG.md"),
+        "# Changelog\r\n\r\n## [0.1.0] - 2025-01-01\r\n\r\n### Features\r\n\r\n- old\r\n").unwrap();
+    {
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("CHANGELOG.md")).unwrap();
+        index.write().unwrap();
+        let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "chore: add changelog", &tree, &[&head]).unwrap();
+    }
+    // Tag to set baseline
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.tag_lightweight("v0.1.0", head.as_object(), false).unwrap();
+    commit(&repo, dir.path(), "a.txt", "x", "feat: new feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+    let p_new = changelog.find("## [0.2.0]").expect("0.2.0 should exist");
+    let p_old = changelog.find("## [0.1.0]").expect("0.1.0 should exist");
+    assert!(p_new < p_old, "new version should come before old: {changelog}");
+}
+
+#[test]
+fn edge_annotated_tag_recognized() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: v1");
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+    repo.tag("v0.1.0", head.as_object(), &sig, "Release v0.1.0", false).unwrap();
+    commit(&repo, dir.path(), "b.txt", "y", "fix: after annotated tag");
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "status", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["last_version"], "0.1.0");
+    assert_eq!(json["next_version"], "0.1.1");
+}
+
+#[test]
+fn edge_commit_with_shell_metacharacters() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: add `foo` helper with $PATH and \"quotes\"");
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--dry-run"]));
+    assert!(stdout.contains("`foo`"));
+}
+
+#[test]
+fn edge_release_specific_commit() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    let target = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+    commit(&repo, dir.path(), "b.txt", "y", "chore: after release commit");
+    let (_, stderr) = run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(), "release", "--commit", &target,
+    ]));
+    assert!(stderr.contains("Created tag 'v0.1.0'"));
+}
+
+#[test]
+fn edge_package_json_no_version_not_detected() {
+    let (dir, repo) = init_repo();
+    std::fs::write(dir.path().join("package.json"), "{\"name\": \"private\", \"private\": true}").unwrap();
+    {
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("package.json")).unwrap();
+        index.write().unwrap();
+        let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "chore: add pkg", &tree, &[&head]).unwrap();
+    }
+    commit(&repo, dir.path(), "a.txt", "x", "feat: thing");
+    // Should work (auto-detect skips package.json with no version)
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--dry-run"]));
+    assert!(!stdout.contains("package.json"), "should not detect versionless package.json");
+}
+
+#[test]
+fn edge_large_version_numbers() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: thing");
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.tag_lightweight("v999.999.999", head.as_object(), false).unwrap();
+    commit(&repo, dir.path(), "b.txt", "y", "feat: another");
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "status", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["last_version"], "999.999.999");
+    assert_eq!(json["next_version"], "999.1000.0");
+}
+
+#[test]
+fn edge_multiple_tags_same_commit() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: thing");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+    // Add an extra tag on the same commit
+    {
+        let repo = Repository::open(dir.path()).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.tag_lightweight("extra-tag", head.as_object(), false).unwrap();
+    }
+    let repo = Repository::open(dir.path()).unwrap();
+    commit(&repo, dir.path(), "b.txt", "y", "fix: fix");
+    let (stdout, _) = run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "status", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["last_version"], "0.1.0", "should use semver tag, not extra-tag");
+}
+
+#[test]
+fn edge_notes_stdout_clean_for_piping() {
+    let (dir, repo) = setup_with_config(MINIMAL_CONFIG);
+    commit(&repo, dir.path(), "a.txt", "x", "feat: feature");
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "prepare", "--no-branch"]));
+    run_ok(binary().args(["--repo", dir.path().to_str().unwrap(), "release"]));
+    // stdout should be clean markdown, stderr should have nothing
+    let output = binary().args(["--repo", dir.path().to_str().unwrap(), "notes", "--latest"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.starts_with("## ["), "stdout should start with markdown heading: {stdout}");
+}
+
+#[test]
 fn edge_check_json_schema() {
     let (dir, repo) = init_repo();
     write_cargo_toml(dir.path(), "0.0.0");

@@ -59,7 +59,7 @@ pub enum Commands {
 #[derive(Args, Debug)]
 pub struct PrepareArgs {
     /// Override the computed bump level.
-    #[arg(long, value_enum)]
+    #[arg(long, value_enum, conflicts_with = "release_version")]
     pub bump: Option<BumpOverride>,
 
     /// Override the computed next version (e.g., "2.0.0").

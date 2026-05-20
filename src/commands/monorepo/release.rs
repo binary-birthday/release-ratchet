@@ -51,10 +51,17 @@ pub fn execute(repo_path: &Path, config: &Config, args: ReleaseArgs, package_fil
             continue;
         }
 
-        tags::create_tag(&repository, &tag_name, target_oid, config.sign_tags)
-            .context(format!("failed to create tag '{tag_name}'"))?;
-        eprintln!("Created tag '{tag_name}' at {short}");
-        created_tags.push(tag_name);
+        match tags::create_tag(&repository, &tag_name, target_oid, config.sign_tags) {
+            Ok(()) => {
+                eprintln!("Created tag '{tag_name}' at {short}");
+                created_tags.push(tag_name);
+            }
+            Err(crate::error::RatchetError::TagAlreadyExists { .. }) => {
+                log::debug!("tag '{tag_name}' already exists, skipping package '{}'", pkg.name);
+                continue;
+            }
+            Err(e) => return Err(e).context(format!("failed to create tag '{tag_name}'")),
+        }
     }
 
     if !args.dry_run {

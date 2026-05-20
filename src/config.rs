@@ -255,7 +255,7 @@ pub fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Confi
         }
     }
 
-    if config.ecosystems.is_empty() {
+    if config.ecosystems.is_empty() && !config.is_monorepo() {
         config.ecosystems = detect_ecosystems(repo_root);
     }
 
@@ -412,7 +412,12 @@ fn has_toml_version(path: &Path, table: &str) -> bool {
     std::fs::read_to_string(path)
         .ok()
         .and_then(|s| s.parse::<toml_edit::DocumentMut>().ok())
-        .and_then(|doc| doc[table]["version"].as_str().map(|_| ()))
+        .and_then(|doc| {
+            doc.get(table)
+                .and_then(|t| t.get("version"))
+                .and_then(|v| v.as_str())
+                .map(|_| ())
+        })
         .is_some()
 }
 

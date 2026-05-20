@@ -13,7 +13,7 @@ jobs:
           flags: --all-targets
       - rust/test
 
-  release:
+  prepare:
     docker:
       - image: cimg/rust:1.86
     steps:
@@ -27,100 +27,98 @@ jobs:
             git config user.name "CircleCI"
             git config user.email "ci@circleci.com"
       - run:
-          name: Install release-ratchet
-          command: cargo install --path .
-      - run:
-          name: Prepare and release
+          name: Check if release needed
           command: |
-            # Skip if HEAD is already a release commit (prevents loop
-            # when CI's own push triggers another run)
-            HEAD_MSG=$(git log -1 --format=%s)
-            if echo "$HEAD_MSG" | grep -q "^chore: release "; then
-              echo "HEAD is already a release commit. Skipping."
-              exit 0
+            if git log -1 --format=%s | grep -q "^chore: release "; then
+              echo "HEAD is a release commit. Skipping prepare."
+              circleci-agent step halt
             fi
-
-            release-ratchet prepare --no-branch || {
+      - run:
+          name: Build release-ratchet
+          command: cargo build --release
+      - run:
+          name: Prepare release
+          command: |
+            ./target/release/release-ratchet prepare || {
               RC=$?
-              if [ $RC -eq 2 ]; then
-                echo "Nothing to release."
-                exit 0
-              fi
+              if [ $RC -eq 2 ]; then echo "Nothing to release."; exit 0; fi
               exit $RC
             }
-            release-ratchet release
-            git push origin main --tags
+            # Push the release branch for PR review
+            git push origin release-ratchet--release
 
-  build-and-publish:
+  release:
     docker:
       - image: cimg/rust:1.86
     steps:
+      - add_ssh_keys:
+          fingerprints:
+            - "${DEPLOY_KEY_FINGERPRINT}"
       - checkout
       - run:
-          name: Build release binary
+          name: Check if this is a release commit
           command: |
-            cargo build --release
-            mkdir -p artifacts
-            cp target/release/release-ratchet artifacts/release-ratchet-x86_64-unknown-linux-gnu
-      - persist_to_workspace:
-          root: artifacts
-          paths:
-            - "*"
-
-  publish-github-release:
-    docker:
-      - image: cibuilds/github:0.13
-    steps:
-      - attach_workspace:
-          at: artifacts
+            if ! git log -1 --format=%s | grep -q "^chore: release "; then
+              echo "Not a release commit. Skipping."
+              circleci-agent step halt
+            fi
       - run:
-          name: Publish release on GitHub
+          name: Configure git
           command: |
-            ghr -t "${GITHUB_TOKEN}" \
+            git config user.name "CircleCI"
+            git config user.email "ci@circleci.com"
+      - run:
+          name: Build release-ratchet
+          command: cargo build --release
+      - run:
+          name: Tag and push
+          command: |
+            ./target/release/release-ratchet release
+            git push origin --tags
+
+            TAG=$(git describe --tags --abbrev=0)
+            echo "export RELEASE_TAG=$TAG" >> "$BASH_ENV"
+
+            mkdir -p /tmp/artifacts
+            cp ./target/release/release-ratchet /tmp/artifacts/release-ratchet-x86_64-unknown-linux-gnu
+      - run:
+          name: Publish to GitHub Releases
+          command: |
+            GHR_VERSION=0.16.2
+            curl -fsSL "https://github.com/tcnksm/ghr/releases/download/v${GHR_VERSION}/ghr_v${GHR_VERSION}_linux_amd64.tar.gz" | tar xz
+            ./ghr_v${GHR_VERSION}_linux_amd64/ghr \
+              -t "${GITHUB_TOKEN}" \
               -u "${CIRCLE_PROJECT_USERNAME}" \
               -r "${CIRCLE_PROJECT_REPONAME}" \
-              -c "${CIRCLE_SHA1}" \
               -replace \
-              "${CIRCLE_TAG}" \
-              artifacts/
+              "${RELEASE_TAG}" \
+              /tmp/artifacts/
 
 workflows:
-  # Run tests on every push
+  # Non-main branches: test only
   test:
     jobs:
       - test:
           filters:
-            tags:
-              only: /.*/
+            branches:
+              ignore: main
 
-  # On main: test, then run release-ratchet to prepare+tag+push
-  auto-release:
+  # Main branch: test → then either prepare or release
+  # - If HEAD is a normal commit: prepare creates a release branch + PR
+  # - If HEAD is a release commit (merged PR): tag + build + publish
+  main:
     jobs:
       - test:
           filters:
             branches:
               only: main
-      - release:
-          requires:
-            - test
+      - prepare:
+          requires: [test]
           filters:
             branches:
               only: main
-
-  # On tag push: build binary and publish to GitHub Releases
-  publish:
-    jobs:
-      - build-and-publish:
+      - release:
+          requires: [test]
           filters:
             branches:
-              ignore: /.*/
-            tags:
-              only: /^v.*/
-      - publish-github-release:
-          requires:
-            - build-and-publish
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /^v.*/
+              only: main

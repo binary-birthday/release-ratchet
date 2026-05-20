@@ -34,12 +34,12 @@ jobs:
               circleci-agent step halt
             fi
       - run:
-          name: Build release-ratchet
-          command: cargo build --release
+          name: Install release-ratchet
+          command: curl -fsSL https://raw.githubusercontent.com/binary-birthday/release-ratchet/main/install.sh | sh
       - run:
           name: Prepare release
           command: |
-            ./target/release/release-ratchet prepare || {
+            release-ratchet prepare || {
               RC=$?
               if [ $RC -eq 2 ]; then echo "Nothing to release."; exit 0; fi
               exit $RC
@@ -56,10 +56,19 @@ jobs:
             - "${DEPLOY_KEY_FINGERPRINT}"
       - checkout
       - run:
-          name: Check if this is a release commit
+          name: Check if this is a release merge
           command: |
-            if ! git log -1 --format=%s | grep -q "^chore: release "; then
-              echo "Not a release commit. Skipping."
+            # Check HEAD itself, or if it's a merge commit, check its parents
+            IS_RELEASE=false
+            if git log -1 --format=%s | grep -q "^chore: release "; then
+              IS_RELEASE=true
+            elif git log -1 --format=%s | grep -q "^Merge.*release-ratchet--release"; then
+              IS_RELEASE=true
+            elif git log -1 --merges --format=%H | head -1 | xargs -I{} git log {} --format=%s -2 | grep -q "^chore: release "; then
+              IS_RELEASE=true
+            fi
+            if [ "$IS_RELEASE" = "false" ]; then
+              echo "Not a release merge. Skipping."
               circleci-agent step halt
             fi
       - run:
@@ -68,17 +77,18 @@ jobs:
             git config user.name "CircleCI"
             git config user.email "ci@circleci.com"
       - run:
-          name: Build release-ratchet
-          command: cargo build --release
+          name: Install release-ratchet
+          command: curl -fsSL https://raw.githubusercontent.com/binary-birthday/release-ratchet/main/install.sh | sh
       - run:
           name: Tag and push
           command: |
-            ./target/release/release-ratchet release
+            release-ratchet release
             git push origin --tags
-
-            TAG=$(git describe --tags --abbrev=0)
-            echo "export RELEASE_TAG=$TAG" >> "$BASH_ENV"
-
+            echo "export RELEASE_TAG=$(git describe --tags --abbrev=0)" >> "$BASH_ENV"
+      - run:
+          name: Build release binary
+          command: |
+            cargo build --release
             mkdir -p /tmp/artifacts
             cp ./target/release/release-ratchet /tmp/artifacts/release-ratchet-x86_64-unknown-linux-gnu
       - run:

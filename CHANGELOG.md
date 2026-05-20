@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-05-20
+
+### Bug Fixes
+
+- CRLF changelog handling, add 11 deep edge case tests, add LICENSE [7d36778](https://github.com/binary-birthday/release-ratchet/commit/7d36778a465b8c2751505226ee5e7df731dab2f1)
+- add conflicts_with for --bump and --release-version on prepare [c37a313](https://github.com/binary-birthday/release-ratchet/commit/c37a313ffd2dc0de7618b32b126e0732d706d7e5)
+- prevent duplicate prepare when HEAD is already a release commit [34dbe60](https://github.com/binary-birthday/release-ratchet/commit/34dbe605c321d804d21d2e7d8bfcc44e2e19c282)
+- monorepo workspace support — autodetect skip, toml panic, tag dedup [ff1dd67](https://github.com/binary-birthday/release-ratchet/commit/ff1dd67282a890629e41bf106508f8a719d2b15f)
+
 ## [0.3.0] - 2026-05-19
 
 ### Features
@@ -52,6 +61,7 @@ All notable changes to this project will be documented in this file.
 - second review pass — robustness and correctness (1aa9ac9)
 - address review findings across codebase (0e2452a)
 
+[0.3.1]: https://github.com/binary-birthday/release-ratchet/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/binary-birthday/release-ratchet/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/binary-birthday/release-ratchet/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/binary-birthday/release-ratchet/compare/v0.1.0...v0.1.1

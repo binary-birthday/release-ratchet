@@ -13,7 +13,79 @@ jobs:
           flags: --all-targets
       - rust/test
 
+  tag:
+    docker:
+      - image: cimg/rust:1.86
+    steps:
+      - add_ssh_keys:
+          fingerprints:
+            - "${DEPLOY_KEY_FINGERPRINT}"
+      - checkout
+      - run:
+          name: Tag if version changed
+          command: |
+            VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+            TAG="v${VERSION}"
+            if git rev-parse "$TAG" >/dev/null 2>&1; then
+              echo "Tag $TAG already exists. Skipping."
+              exit 0
+            fi
+            git config user.name "CircleCI"
+            git config user.email "ci@circleci.com"
+            git tag "$TAG"
+            git push origin "$TAG"
+            echo "Created and pushed $TAG"
+
+  build-and-publish:
+    docker:
+      - image: cimg/rust:1.86
+    steps:
+      - checkout
+      - run:
+          name: Build release binary
+          command: |
+            cargo build --release
+            mkdir -p artifacts
+            cp target/release/release-ratchet artifacts/release-ratchet-x86_64-unknown-linux-gnu
+      - run:
+          name: Publish to GitHub Releases
+          command: |
+            GHR_VERSION=0.16.2
+            curl -fsSL "https://github.com/tcnksm/ghr/releases/download/v${GHR_VERSION}/ghr_v${GHR_VERSION}_linux_amd64.tar.gz" | tar xz
+            ./ghr_v${GHR_VERSION}_linux_amd64/ghr \
+              -t "${GITHUB_TOKEN}" \
+              -u "${CIRCLE_PROJECT_USERNAME}" \
+              -r "${CIRCLE_PROJECT_REPONAME}" \
+              -c "${CIRCLE_SHA1}" \
+              -replace \
+              "${CIRCLE_TAG}" \
+              artifacts/
+
 workflows:
   test:
     jobs:
-      - test
+      - test:
+          filters:
+            tags:
+              only: /.*/
+
+  main:
+    jobs:
+      - test:
+          filters:
+            branches:
+              only: main
+      - tag:
+          requires: [test]
+          filters:
+            branches:
+              only: main
+
+  release:
+    jobs:
+      - build-and-publish:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/

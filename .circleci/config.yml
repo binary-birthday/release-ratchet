@@ -13,7 +13,47 @@ jobs:
           flags: --all-targets
       - rust/test
 
+  build-and-publish:
+    docker:
+      - image: cimg/rust:1.86
+    steps:
+      - checkout
+      - run:
+          name: Build release binary
+          command: |
+            cargo build --release
+            mkdir -p artifacts
+            cp target/release/release-ratchet artifacts/release-ratchet-x86_64-unknown-linux-gnu
+      - run:
+          name: Install ghr
+          command: |
+            GHR_VERSION=0.16.2
+            curl -fsSL "https://github.com/tcnksm/ghr/releases/download/v${GHR_VERSION}/ghr_v${GHR_VERSION}_linux_amd64.tar.gz" | tar xz
+            sudo cp ghr_v${GHR_VERSION}_linux_amd64/ghr /usr/local/bin/
+      - run:
+          name: Publish to GitHub Releases
+          command: |
+            ghr -t "${GITHUB_TOKEN}" \
+              -u "${CIRCLE_PROJECT_USERNAME}" \
+              -r "${CIRCLE_PROJECT_REPONAME}" \
+              -c "${CIRCLE_SHA1}" \
+              -replace \
+              "${CIRCLE_TAG}" \
+              artifacts/
+
 workflows:
   test:
     jobs:
-      - test
+      - test:
+          filters:
+            tags:
+              only: /.*/
+
+  release:
+    jobs:
+      - build-and-publish:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/

@@ -13,17 +13,46 @@ jobs:
           flags: --all-targets
       - rust/test
 
-  build-linux:
+  release:
+    docker:
+      - image: cimg/rust:1.86
+    steps:
+      - add_ssh_keys:
+          fingerprints:
+            - "${DEPLOY_KEY_FINGERPRINT}"
+      - checkout
+      - run:
+          name: Configure git
+          command: |
+            git config user.name "CircleCI"
+            git config user.email "ci@circleci.com"
+      - run:
+          name: Install release-ratchet
+          command: cargo build --release && cp target/release/release-ratchet /usr/local/bin/
+      - run:
+          name: Prepare and release
+          command: |
+            # Exit cleanly if nothing to release (exit code 2)
+            release-ratchet prepare --no-branch || {
+              RC=$?
+              if [ $RC -eq 2 ]; then
+                echo "Nothing to release."
+                exit 0
+              fi
+              exit $RC
+            }
+            release-ratchet release
+            git push origin main --tags
+
+  build-and-publish:
     docker:
       - image: cimg/rust:1.86
     steps:
       - checkout
       - run:
           name: Build release binary
-          command: cargo build --release
-      - run:
-          name: Package binary
           command: |
+            cargo build --release
             mkdir -p artifacts
             cp target/release/release-ratchet artifacts/release-ratchet-x86_64-unknown-linux-gnu
       - persist_to_workspace:
@@ -49,6 +78,7 @@ jobs:
               artifacts/
 
 workflows:
+  # Run tests on every push
   test:
     jobs:
       - test:
@@ -56,9 +86,24 @@ workflows:
             tags:
               only: /.*/
 
-  release:
+  # On main: test, then run release-ratchet to prepare+tag+push
+  auto-release:
     jobs:
-      - build-linux:
+      - test:
+          filters:
+            branches:
+              only: main
+      - release:
+          requires:
+            - test
+          filters:
+            branches:
+              only: main
+
+  # On tag push: build binary and publish to GitHub Releases
+  publish:
+    jobs:
+      - build-and-publish:
           filters:
             branches:
               ignore: /.*/
@@ -66,7 +111,7 @@ workflows:
               only: /^v.*/
       - publish-github-release:
           requires:
-            - build-linux
+            - build-and-publish
           filters:
             branches:
               ignore: /.*/

@@ -45,7 +45,7 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs) -> Result<(
     };
 
     // 2. Collect commits
-    let collection = commits::collect_since_tag(&repository, since_oid)
+    let collection = commits::collect_since_tag(&repository, since_oid, config.forge.as_ref())
         .context("failed to collect commits")?;
 
     if collection.non_conventional_count > 0 {

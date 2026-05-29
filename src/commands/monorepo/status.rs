@@ -26,7 +26,7 @@ pub fn execute(repo_path: &Path, config: &Config, args: StatusArgs, package_filt
         };
 
         let prefixes = path_prefixes_for_package(pkg, &config.shared_paths);
-        let collection = commits::collect_since_tag_filtered(&repository, since_oid, &prefixes)
+        let collection = commits::collect_since_tag_filtered(&repository, since_oid, &prefixes, config.forge.as_ref())
             .context(format!("failed to collect commits for package '{}'", pkg.name))?;
 
         let bump = semver_bump::determine_bump(&collection.conventional, config);

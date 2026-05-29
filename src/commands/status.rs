@@ -19,7 +19,7 @@ pub fn execute(repo_path: &Path, config: &Config, args: StatusArgs) -> Result<()
         None => (semver::Version::new(0, 0, 0), None, None),
     };
 
-    let collection = commits::collect_since_tag(&repository, since_oid)
+    let collection = commits::collect_since_tag(&repository, since_oid, config.forge.as_ref())
         .context("failed to collect commits")?;
 
     let bump = semver_bump::determine_bump(&collection.conventional, config);

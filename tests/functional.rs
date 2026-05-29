@@ -1741,3 +1741,210 @@ fn edge_check_json_schema() {
     assert!(json.get("errors").is_some());
     assert!(json.get("changelog_has_section").is_some());
 }
+
+// ============================================================================
+// Forge: Bitbucket Cloud
+// ============================================================================
+
+#[test]
+fn forge_bitbucket_cloud_squash_merge_detected() {
+    let config = r#"
+        tag_prefix = "v"
+        forge = "bitbucket-cloud"
+        [[ecosystems]]
+        type = "cargo"
+        path = "Cargo.toml"
+    "#;
+    let (dir, repo) = setup_with_config(config);
+    write_cargo_toml(dir.path(), "0.0.0");
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml"]);
+
+    // Simulate a Bitbucket Cloud squash merge commit
+    commit(
+        &repo, dir.path(), "auth.rs", "fn login() {}",
+        "Merged in feature/auth (pull request #42)\n\nfeat(auth): add login endpoint\n\n* abc1234 initial auth\n* def5678 add tests",
+    );
+
+    let (_, stderr) = run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(), "status",
+    ]));
+    assert!(stderr.contains("minor"), "expected minor bump from feat, got: {stderr}");
+    assert!(stderr.contains("0.1.0"), "expected 0.1.0, got: {stderr}");
+}
+
+#[test]
+fn forge_bitbucket_cloud_full_e2e() {
+    let bb_config = r#"
+        tag_prefix = "v"
+        forge = "bitbucket-cloud"
+        [[ecosystems]]
+        type = "cargo"
+        path = "Cargo.toml"
+    "#;
+    let (dir, repo) = setup_with_config(bb_config);
+    let r = dir.path().to_str().unwrap();
+    write_cargo_toml(dir.path(), "0.0.0");
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml"]);
+
+    // --- Cycle 1: BB squash merge feat → 0.1.0 ---
+    commit(
+        &repo, dir.path(), "auth.rs", "fn login() {}",
+        "Merged in feature/auth (pull request #42)\n\nfeat(auth): add login endpoint\n\n* abc1234 initial auth\n* def5678 add tests",
+    );
+
+    // Status should detect it as a minor bump
+    let (stdout, _) = run_ok(binary().args(["--repo", r, "status", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["bump_level"], "minor");
+    assert_eq!(json["next_version"], "0.1.0");
+
+    // Notes should generate changelog content
+    let (stdout, _) = run_ok(binary().args(["--repo", r, "notes"]));
+    assert!(stdout.contains("add login endpoint"), "notes missing description: {stdout}");
+    assert!(stdout.contains("Features"), "notes missing Features heading: {stdout}");
+
+    // Validate should pass (BB merge commit recognized as valid via forge config)
+    let (_, stderr) = run_ok(binary().args(["--repo", r, "validate"]));
+    assert!(stderr.contains("All commits are valid"), "validate failed: {stderr}");
+
+    // Prepare
+    run_ok(binary().args(["--repo", r, "prepare", "--no-branch"]));
+    let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+    assert!(changelog.contains("## [0.1.0]"), "changelog missing 0.1.0 section");
+    assert!(changelog.contains("add login endpoint"), "changelog missing commit description");
+    let cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+    assert!(cargo.contains("version = \"0.1.0\""), "Cargo.toml not bumped");
+
+    // Release
+    let (_, stderr) = run_ok(binary().args(["--repo", r, "release"]));
+    assert!(stderr.contains("Created tag 'v0.1.0'"), "release didn't create tag: {stderr}");
+    assert!(repo.refname_to_id("refs/tags/v0.1.0").is_ok());
+
+    // Check should pass post-release
+    let (stdout, _) = run_ok(binary().args(["--repo", r, "check", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["consistent"], true, "check failed: {stdout}");
+
+    // --- Cycle 2: mix of BB squash merge fix + normal commit → 0.1.1 ---
+    commit(
+        &repo, dir.path(), "parser.rs", "fn parse() {}",
+        "Merged in bugfix/parser (pull request #43)\n\nfix(parser): handle empty input\n\n* 111 fix empty\n* 222 add test",
+    );
+    // Also a regular (non-BB) commit in the same cycle
+    commit(
+        &repo, dir.path(), "docs.rs", "// docs",
+        "docs: update API reference",
+    );
+
+    let (stdout, _) = run_ok(binary().args(["--repo", r, "status", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["bump_level"], "patch");
+    assert_eq!(json["next_version"], "0.1.1");
+
+    // Prepare and release cycle 2
+    run_ok(binary().args(["--repo", r, "prepare", "--no-branch"]));
+    let (_, stderr) = run_ok(binary().args(["--repo", r, "release"]));
+    assert!(stderr.contains("Created tag 'v0.1.1'"), "cycle 2 tag: {stderr}");
+
+    // Changelog should have both versions in order
+    let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+    let p1 = changelog.find("## [0.1.1]").expect("missing 0.1.1");
+    let p2 = changelog.find("## [0.1.0]").expect("missing 0.1.0");
+    assert!(p1 < p2, "0.1.1 should come before 0.1.0 in changelog");
+    assert!(changelog.contains("handle empty input"), "changelog missing fix description");
+
+    // Notes --latest should return the 0.1.1 section
+    let (stdout, _) = run_ok(binary().args(["--repo", r, "notes", "--latest"]));
+    assert!(stdout.contains("0.1.1"), "notes --latest missing 0.1.1: {stdout}");
+    assert!(stdout.contains("handle empty input"), "notes --latest missing fix: {stdout}");
+
+    // Notes for specific version
+    let (stdout, _) = run_ok(binary().args(["--repo", r, "notes", "0.1.0"]));
+    assert!(stdout.contains("add login endpoint"), "notes 0.1.0 wrong: {stdout}");
+
+    // --- Cycle 3: BB squash merge breaking → 1.0.0 ---
+    commit(
+        &repo, dir.path(), "api.rs", "fn v2() {}",
+        "Merged in feature/v2 (pull request #44)\n\nfeat!: redesign API\n\nNew API surface.\n\nBREAKING CHANGE: removed /v1 endpoints",
+    );
+
+    let (stdout, _) = run_ok(binary().args(["--repo", r, "status", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["bump_level"], "major");
+    assert_eq!(json["next_version"], "1.0.0");
+    assert_eq!(json["breaking_changes"], 1);
+
+    run_ok(binary().args(["--repo", r, "prepare", "--no-branch"]));
+
+    // Changelog should have BREAKING CHANGES section
+    let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+    assert!(changelog.contains("BREAKING CHANGES"), "missing breaking section: {changelog}");
+    assert!(changelog.contains("removed /v1 endpoints"), "missing breaking detail: {changelog}");
+
+    let (_, stderr) = run_ok(binary().args(["--repo", r, "release"]));
+    assert!(stderr.contains("Created tag 'v1.0.0'"), "cycle 3 tag: {stderr}");
+
+    // Final status should be clean
+    let (stdout, _) = run_ok(binary().args(["--repo", r, "status", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["last_version"], "1.0.0");
+    assert_eq!(json["bump_level"], "none");
+
+    // Final check
+    let (stdout, _) = run_ok(binary().args(["--repo", r, "check", "--json"]));
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["consistent"], true);
+    assert_eq!(json["tag_version"], "1.0.0");
+}
+
+#[test]
+fn forge_bitbucket_cloud_breaking_change_is_major() {
+    let config = r#"
+        tag_prefix = "v"
+        forge = "bitbucket-cloud"
+        [[ecosystems]]
+        type = "cargo"
+        path = "Cargo.toml"
+    "#;
+    let (dir, repo) = setup_with_config(config);
+    write_cargo_toml(dir.path(), "1.0.0");
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml"]);
+    // Tag current state as v1.0.0
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.tag_lightweight("v1.0.0", head.as_object(), false).unwrap();
+
+    commit(
+        &repo, dir.path(), "api.rs", "fn new_api() {}",
+        "Merged in feature/v2-api (pull request #100)\n\nfeat!: redesign API\n\nBREAKING CHANGE: old endpoints removed",
+    );
+
+    let (_, stderr) = run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(), "status",
+    ]));
+    assert!(stderr.contains("major"), "expected major bump, got: {stderr}");
+    assert!(stderr.contains("2.0.0"), "expected 2.0.0, got: {stderr}");
+}
+
+#[test]
+fn forge_none_ignores_bb_merge_commits() {
+    let config = r#"
+        tag_prefix = "v"
+        [[ecosystems]]
+        type = "cargo"
+        path = "Cargo.toml"
+    "#;
+    let (dir, repo) = setup_with_config(config);
+    write_cargo_toml(dir.path(), "0.0.0");
+    commit_initial_files(&repo, dir.path(), &["Cargo.toml"]);
+
+    commit(
+        &repo, dir.path(), "auth.rs", "fn login() {}",
+        "Merged in feature/auth (pull request #42)\n\nfeat(auth): add login endpoint",
+    );
+
+    // Without forge config, BB merge commit should be treated as non-conventional
+    let (_, stderr) = run_ok(binary().args([
+        "--repo", dir.path().to_str().unwrap(), "status",
+    ]));
+    assert!(stderr.contains("none") || stderr.contains("None"), "expected no bump without forge config, got: {stderr}");
+}

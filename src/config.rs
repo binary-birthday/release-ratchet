@@ -37,6 +37,10 @@ pub struct Config {
     #[serde(default)]
     pub hooks: HooksConfig,
 
+    /// Git forge for merge commit parsing (e.g., "bitbucket-cloud").
+    #[serde(default)]
+    pub forge: Option<Forge>,
+
     /// When non-empty, activates monorepo mode.
     #[serde(default)]
     pub packages: Vec<PackageConfig>,
@@ -80,6 +84,7 @@ impl Default for Config {
             sign_tags: false,
             cleanup_branch: false,
             hooks: HooksConfig::default(),
+            forge: None,
             packages: Vec::new(),
             shared_paths: Vec::new(),
         }
@@ -121,6 +126,12 @@ pub struct HooksConfig {
     pub post_prepare: Vec<String>,
     #[serde(default)]
     pub post_release: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Forge {
+    BitbucketCloud,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

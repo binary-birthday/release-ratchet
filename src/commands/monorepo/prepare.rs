@@ -73,7 +73,7 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs, package_fil
         };
 
         let prefixes = path_prefixes_for_package(pkg, &config.shared_paths);
-        let collection = commits::collect_since_tag_filtered(&repository, since_oid, &prefixes)
+        let collection = commits::collect_since_tag_filtered(&repository, since_oid, &prefixes, config.forge.as_ref())
             .context(format!("failed to collect commits for '{}'", pkg.name))?;
 
         if collection.conventional.is_empty() && args.bump.is_none() && args.release_version.is_none() {
@@ -175,7 +175,7 @@ pub fn execute(repo_path: &Path, config: &Config, args: PrepareArgs, package_fil
             let latest = tags::find_latest_tag(&repository, &rel.package.tag_prefix, TagFilter::StableOnly)?;
             let since_oid = latest.map(|t| t.oid);
             let prefixes = path_prefixes_for_package(rel.package, &config.shared_paths);
-            let collection = commits::collect_since_tag_filtered(&repository, since_oid, &prefixes)?;
+            let collection = commits::collect_since_tag_filtered(&repository, since_oid, &prefixes, config.forge.as_ref())?;
             rel.section = generator::generate_section(&rel.next_version, &collection.conventional, config, remote_url.as_deref());
         }
     }

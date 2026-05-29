@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use git2::Repository;
 
+use crate::config::Forge;
 use crate::conventional::parser;
 use crate::conventional::types::ConventionalCommit;
 use crate::error::RatchetError;
@@ -15,8 +16,9 @@ pub struct CommitCollection {
 pub fn collect_since_tag(
     repo: &Repository,
     since_oid: Option<git2::Oid>,
+    forge: Option<&Forge>,
 ) -> Result<CommitCollection, RatchetError> {
-    collect_since_tag_bounded(repo, since_oid, None)
+    collect_since_tag_bounded(repo, since_oid, None, forge)
 }
 
 /// Collect commits in range (`since_oid`..`until_oid`].
@@ -26,6 +28,7 @@ pub fn collect_since_tag_bounded(
     repo: &Repository,
     since_oid: Option<git2::Oid>,
     until_oid: Option<git2::Oid>,
+    forge: Option<&Forge>,
 ) -> Result<CommitCollection, RatchetError> {
     // Handle empty repo (no HEAD)
     if until_oid.is_none() && repo.head().is_err() {
@@ -69,7 +72,7 @@ pub fn collect_since_tag_bounded(
             .unwrap_or("Unknown")
             .to_string();
 
-        match parser::parse_commit(oid, &message, &author) {
+        match parser::parse_commit_with_forge(oid, &message, &author, forge) {
             Some(cc) => conventional.push(cc),
             None => {
                 log::debug!(
@@ -94,6 +97,7 @@ pub fn collect_since_tag_filtered(
     repo: &Repository,
     since_oid: Option<git2::Oid>,
     path_prefixes: &[String],
+    forge: Option<&Forge>,
 ) -> Result<CommitCollection, RatchetError> {
     if repo.head().is_err() {
         return Ok(CommitCollection {
@@ -124,7 +128,7 @@ pub fn collect_since_tag_filtered(
         let message = commit.message().unwrap_or("").to_string();
         let author = commit.author().name().unwrap_or("Unknown").to_string();
 
-        match parser::parse_commit(oid, &message, &author) {
+        match parser::parse_commit_with_forge(oid, &message, &author, forge) {
             Some(cc) => conventional.push(cc),
             None => non_conventional_count += 1,
         }

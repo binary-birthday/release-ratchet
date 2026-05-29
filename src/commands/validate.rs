@@ -51,7 +51,7 @@ pub fn execute(repo_path: &Path, config: &Config, args: ValidateArgs) -> Result<
 
     eprintln!("Validating commits in range: {range_desc}");
 
-    let collection = commits::collect_since_tag_bounded(&repository, since_oid, to_oid)?;
+    let collection = commits::collect_since_tag_bounded(&repository, since_oid, to_oid, config.forge.as_ref())?;
 
     let total = collection.conventional.len() + collection.non_conventional_count;
 

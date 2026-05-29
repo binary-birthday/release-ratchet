@@ -2,6 +2,7 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 use super::types::{CommitFooter, CommitType, ConventionalCommit};
+use crate::config::Forge;
 
 static HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -42,6 +43,55 @@ pub fn parse_commit(oid: git2::Oid, message: &str, author: &str) -> Option<Conve
         raw_message: message.to_string(),
         author: author.to_string(),
     })
+}
+
+static BB_CLOUD_MERGE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^Merged in .+ \(pull request #\d+\)$").unwrap()
+});
+
+/// Like `parse_commit`, but applies forge-specific extraction when the first line
+/// isn't a conventional commit header. For Bitbucket Cloud, the CC header is the
+/// first non-blank body line after `Merged in <branch> (pull request #N)`.
+pub fn parse_commit_with_forge(
+    oid: git2::Oid,
+    message: &str,
+    author: &str,
+    forge: Option<&Forge>,
+) -> Option<ConventionalCommit> {
+    if let Some(cc) = parse_commit(oid, message, author) {
+        return Some(cc);
+    }
+
+    match forge {
+        Some(Forge::BitbucketCloud) => parse_bitbucket_cloud_commit(oid, message, author),
+        None => None,
+    }
+}
+
+fn parse_bitbucket_cloud_commit(
+    oid: git2::Oid,
+    message: &str,
+    author: &str,
+) -> Option<ConventionalCommit> {
+    let lines: Vec<&str> = message.lines().collect();
+    if lines.is_empty() || !BB_CLOUD_MERGE_RE.is_match(lines[0].trim()) {
+        return None;
+    }
+
+    // Find first non-empty line after the merge header
+    let mut cc_start = 1;
+    while cc_start < lines.len() && lines[cc_start].trim().is_empty() {
+        cc_start += 1;
+    }
+    if cc_start >= lines.len() {
+        return None;
+    }
+
+    // Reconstruct from the CC line onward and parse normally
+    let reconstructed = lines[cc_start..].join("\n");
+    let mut cc = parse_commit(oid, &reconstructed, author)?;
+    cc.raw_message = message.to_string();
+    Some(cc)
 }
 
 fn parse_body_and_footers(lines: &[&str]) -> (Option<String>, Vec<CommitFooter>) {
@@ -242,5 +292,61 @@ mod tests {
     fn scope_with_spaces() {
         let c = parse_commit(oid(), "feat(some module): add thing", "Alice").unwrap();
         assert_eq!(c.scope.as_deref(), Some("some module"));
+    }
+
+    #[test]
+    fn bb_cloud_squash_merge_extracts_cc() {
+        let msg = "Merged in feature/auth (pull request #42)\n\nfeat(auth): add login endpoint\n\nSome body text.\n\n* abc1234 initial auth\n* def5678 add tests";
+        let forge = Forge::BitbucketCloud;
+
+        assert!(parse_commit(oid(), msg, "Alice").is_none());
+
+        let c = parse_commit_with_forge(oid(), msg, "Alice", Some(&forge)).unwrap();
+        assert_eq!(c.commit_type, CommitType::Feat);
+        assert_eq!(c.scope.as_deref(), Some("auth"));
+        assert_eq!(c.description, "add login endpoint");
+        assert!(c.body.is_some());
+        assert_eq!(c.raw_message, msg);
+    }
+
+    #[test]
+    fn bb_cloud_squash_merge_breaking() {
+        let msg = "Merged in feature/v2 (pull request #99)\n\nfeat!: rewrite API\n\nNew API design.\n\nBREAKING CHANGE: old endpoints removed";
+        let forge = Forge::BitbucketCloud;
+
+        let c = parse_commit_with_forge(oid(), msg, "Alice", Some(&forge)).unwrap();
+        assert!(c.breaking);
+        assert!(c.is_breaking());
+        assert_eq!(c.footers.len(), 1);
+        assert_eq!(c.footers[0].token, "BREAKING CHANGE");
+    }
+
+    #[test]
+    fn bb_cloud_squash_merge_no_cc_in_body_returns_none() {
+        let msg = "Merged in feature/stuff (pull request #10)\n\nJust a regular PR title\n\nSome description";
+        let forge = Forge::BitbucketCloud;
+        assert!(parse_commit_with_forge(oid(), msg, "Alice", Some(&forge)).is_none());
+    }
+
+    #[test]
+    fn bb_cloud_squash_merge_empty_body_returns_none() {
+        let msg = "Merged in feature/stuff (pull request #5)\n\n";
+        let forge = Forge::BitbucketCloud;
+        assert!(parse_commit_with_forge(oid(), msg, "Alice", Some(&forge)).is_none());
+    }
+
+    #[test]
+    fn forge_none_does_not_extract_from_body() {
+        let msg = "Merged in feature/auth (pull request #42)\n\nfeat: add login";
+        assert!(parse_commit_with_forge(oid(), msg, "Alice", None).is_none());
+    }
+
+    #[test]
+    fn standard_cc_still_works_with_forge_set() {
+        let msg = "fix(parser): handle edge case";
+        let forge = Forge::BitbucketCloud;
+        let c = parse_commit_with_forge(oid(), msg, "Alice", Some(&forge)).unwrap();
+        assert_eq!(c.commit_type, CommitType::Fix);
+        assert_eq!(c.scope.as_deref(), Some("parser"));
     }
 }

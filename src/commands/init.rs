@@ -18,6 +18,10 @@ release_branch = "chore/next-release"
 # Path to the changelog file
 changelog_path = "CHANGELOG.md"
 
+# Git forge (affects how merge commit messages are parsed)
+# Bitbucket Cloud squash merges put the PR title in the body, not the subject.
+# forge = "bitbucket-cloud"
+
 # Ecosystems to update version numbers in
 [[ecosystems]]
 type = "cargo"
